@@ -15,7 +15,7 @@ st.set_page_config(
 
 def generate_sample_data():
     """Generate sample sales data"""
-    dates = pd.date_range(end=datetime.now(), periods=24, freq='M')
+    dates = pd.date_range(end=datetime.now(), periods=24, freq='ME')
     np.random.seed(42)
     
     data = {
@@ -33,7 +33,7 @@ def generate_forecast(df, periods=6):
     forecast_dates = pd.date_range(
         start=last_date + timedelta(days=30),
         periods=periods,
-        freq='M'
+        freq='ME'
     )
     
     np.random.seed(123)
@@ -81,7 +81,7 @@ def create_forecast_chart(historical_df, forecast_df, title, y_column):
         height=400
     )
     
-    fig.update_yaxis(tickprefix='$')
+    fig.update_yaxes(tickprefix='$')
     
     return fig
 
