@@ -183,3 +183,83 @@ def forecast_revenue(data, sales_forecast, model_choice, periods, freq):
         revenue = sales_forecast * ((data['revenue'] / data['sales']).mean())
     
     return revenue
+
+def calculate_accuracy_metrics(actual, predicted):
+    """
+    Calculate MAE, RMSE, MAPE accuracy metrics.
+    """
+    mae = np.mean(np.abs(actual - predicted))
+    rmse = np.sqrt(np.mean((actual - predicted) ** 2))
+    mape = np.mean(np.abs((actual - predicted) / actual)) * 100 if np.all(actual != 0) else np.inf
+    return {'mae': mae, 'rmse': rmse, 'mape': mape}
+
+def evaluate_models(data, periods, test_size=0.2):
+    """
+    Evaluate all models on test data and return the best one.
+    
+    Parameters:
+    - data: preprocessed dataframe
+    - periods: forecast periods
+    - test_size: proportion of data to use for testing (0-1)
+    
+    Returns:
+    - Dictionary with best model, accuracy, and all results
+    """
+    data = data.copy()
+    data['date'] = pd.to_datetime(data['date'])
+    
+    # Split data
+    split_idx = int(len(data) * (1 - test_size))
+    train = data.iloc[:split_idx].copy()
+    test = data.iloc[split_idx:].copy()
+    
+    models_to_test = ['ARIMA', 'Prophet', 'Linear Regression']
+    results = {}
+    best_model = None
+    best_accuracy = float('inf')
+    
+    for model_name in models_to_test:
+        try:
+            # Train on train set, forecast test period
+            forecast_df = forecast_sales(train, len(test), model_name, auto_config=True)
+            
+            # Calculate accuracy on test set
+            if len(forecast_df) >= len(test):
+                predicted = forecast_df['forecast_sales'].values[:len(test)]
+                actual = test['sales'].values
+                
+                metrics = calculate_accuracy_metrics(actual, predicted)
+                accuracy = 100 - metrics['mape'] if metrics['mape'] != np.inf else 0
+                accuracy = max(0, min(100, accuracy))  # Clamp between 0-100
+                
+                results[model_name] = {
+                    'forecast': forecast_df,
+                    'accuracy': round(accuracy, 2),
+                    'mape': round(metrics['mape'], 2),
+                    'rmse': round(metrics['rmse'], 2)
+                }
+                
+                if metrics['mape'] < best_accuracy and metrics['mape'] != np.inf:
+                    best_accuracy = metrics['mape']
+                    best_model = model_name
+        except:
+            results[model_name] = {
+                'forecast': None,
+                'accuracy': 0,
+                'mape': np.inf,
+                'rmse': np.inf
+            }
+    
+    # If no model succeeded, default to Prophet
+    if best_model is None:
+        best_model = 'Prophet'
+    
+    # Get best forecast on full data
+    best_forecast = forecast_sales(data, periods, best_model, auto_config=True)
+    results[best_model]['forecast'] = best_forecast
+    
+    return {
+        'best_model': best_model,
+        'best_accuracy': results[best_model]['accuracy'],
+        'results': results
+    }
