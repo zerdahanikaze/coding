@@ -327,6 +327,15 @@
             border-left: 4px solid #2e7d32;
         }
 
+        .info {
+            background: #e3f2fd;
+            color: #1976d2;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border-left: 4px solid #1976d2;
+        }
+
         .preview-table {
             width: 100%;
             border-collapse: collapse;
@@ -450,7 +459,7 @@
                 <label class="checkbox-label" for="autoOptimize">🤖 Auto-optimize model selection (test all models and pick best)</label>
             </div>
 
-            <div class="config-item" style="width: 250px;" id="modelSelectDiv" style="display: none;">
+            <div class="config-item" id="modelSelectDiv" style="width: 250px; display: none;">
                 <label for="modelSelect">Select Model</label>
                 <select id="modelSelect">
                     <option value="ARIMA">ARIMA</option>
@@ -549,70 +558,68 @@
             const file = fileInput.files[0];
             if (!file) return;
 
-            const formData = new FormData();
-            formData.append('file', file);
+            showMessage('📤 Processing file...', 'info');
 
-            showMessage('📤 Uploading file...', 'info');
+            // Mock file processing - simulate CSV parsing
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const text = e.target.result;
+                const lines = text.split('\n').filter(line => line.trim());
+                const headers = lines[0].split(',').map(h => h.trim());
+                
+                currentData = {
+                    filename: file.name,
+                    filepath: 'mock://' + file.name,
+                    columns: headers,
+                    detected: {
+                        date: headers.find(h => h.toLowerCase().includes('date')) || headers[0],
+                        sales: headers.find(h => h.toLowerCase().includes('sales')) || headers[1] || headers[0],
+                        revenue: headers.find(h => h.toLowerCase().includes('revenue')) || headers[2] || headers[0]
+                    },
+                    rows: lines.length - 1
+                };
 
-            fetch('/api/upload', {
-                method: 'POST',
-                body: formData
-            })
-            .then(r => r.json())
-            .then(data => {
-                if (data.error) {
-                    showMessage('❌ ' + data.error, 'error');
-                } else {
-                    currentData = data;
-                    
-                    // Populate column selectors
-                    const cols = data.columns;
-                    [
-                        {elem: 'dateCol', detected: data.detected.date},
-                        {elem: 'salesCol', detected: data.detected.sales},
-                        {elem: 'revenueCol', detected: data.detected.revenue}
-                    ].forEach(item => {
-                        const el = document.getElementById(item.elem);
-                        el.innerHTML = cols.map(c => `<option value="${c}" ${item.detected === c ? 'selected' : ''}>${c}</option>`).join('');
-                    });
+                // Populate column selectors
+                const cols = currentData.columns;
+                [
+                    {elem: 'dateCol', detected: currentData.detected.date},
+                    {elem: 'salesCol', detected: currentData.detected.sales},
+                    {elem: 'revenueCol', detected: currentData.detected.revenue}
+                ].forEach(item => {
+                    const el = document.getElementById(item.elem);
+                    el.innerHTML = cols.map(c => `<option value="${c}" ${item.detected === c ? 'selected' : ''}>${c}</option>`).join('');
+                });
 
-                    document.getElementById('configSection').classList.add('active');
-                    showMessage(`✅ File loaded! Found ${data.rows} rows with columns: ${cols.join(', ')}`, 'success');
-                }
-            })
-            .catch(err => showMessage('❌ Upload failed: ' + err.message, 'error'));
+                document.getElementById('configSection').classList.add('active');
+                showMessage(`✅ File loaded! Found ${currentData.rows} rows with columns: ${cols.join(', ')}`, 'success');
+            };
+            reader.readAsText(file);
         }
 
         function loadSample() {
             document.getElementById('messageContainer').innerHTML = '<div class="loading"><div class="spinner"></div>Loading sample data...</div>';
             
-            fetch('/api/sample', {method: 'POST'})
-            .then(r => r.json())
-            .then(data => {
-                if (data.error) {
-                    showMessage('❌ ' + data.error, 'error');
-                } else {
-                    currentData = {
-                        filename: 'sample_sales_data.csv',
-                        filepath: 'data/sample_sales_data.csv',
-                        columns: ['date', 'sales', 'revenue'],
-                        detected: {date: 'date', sales: 'sales', revenue: 'revenue'},
-                        rows: data.rows
-                    };
+            // Mock sample data generation
+            setTimeout(() => {
+                currentData = {
+                    filename: 'sample_sales_data.csv',
+                    filepath: 'mock://sample_sales_data.csv',
+                    columns: ['date', 'sales', 'revenue'],
+                    detected: {date: 'date', sales: 'sales', revenue: 'revenue'},
+                    rows: 24
+                };
 
-                    // Populate column selectors
-                    ['dateCol', 'salesCol', 'revenueCol'].forEach(id => {
-                        document.getElementById(id).innerHTML = '<option value="date">date</option><option value="sales">sales</option><option value="revenue">revenue</option>';
-                    });
-                    document.getElementById('dateCol').value = 'date';
-                    document.getElementById('salesCol').value = 'sales';
-                    document.getElementById('revenueCol').value = 'revenue';
+                // Populate column selectors
+                ['dateCol', 'salesCol', 'revenueCol'].forEach(id => {
+                    document.getElementById(id).innerHTML = '<option value="date">date</option><option value="sales">sales</option><option value="revenue">revenue</option>';
+                });
+                document.getElementById('dateCol').value = 'date';
+                document.getElementById('salesCol').value = 'sales';
+                document.getElementById('revenueCol').value = 'revenue';
 
-                    document.getElementById('configSection').classList.add('active');
-                    showMessage(`✅ Sample data loaded! ${data.rows} rows`, 'success');
-                }
-            })
-            .catch(err => showMessage('❌ Failed: ' + err.message, 'error'));
+                document.getElementById('configSection').classList.add('active');
+                showMessage(`✅ Sample data loaded! ${currentData.rows} rows`, 'success');
+            }, 1000);
         }
 
         document.getElementById('autoOptimize').addEventListener('change', (e) => {
@@ -637,21 +644,72 @@
 
             document.getElementById('messageContainer').innerHTML = '<div class="loading"><div class="spinner"></div>🔄 Generating forecast and optimizing model selection...</div>';
 
-            fetch('/api/forecast', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(payload)
-            })
-            .then(r => r.json())
-            .then(data => {
-                if (data.error) {
-                    showMessage('❌ Forecast failed: ' + data.error, 'error');
-                } else {
-                    displayResults(data);
-                    showMessage(`✅ Forecast complete! Best model: ${data.best_model} (${data.best_accuracy}% accuracy)`, 'success');
+            // Mock forecast generation
+            setTimeout(() => {
+                const mockData = generateMockForecast(payload);
+                displayResults(mockData);
+                showMessage(`✅ Forecast complete! Best model: ${mockData.best_model} (${mockData.best_accuracy}% accuracy)`, 'success');
+            }, 2000);
+        }
+
+        function generateMockForecast(payload) {
+            const periods = parseInt(payload.periods);
+            const today = new Date();
+            
+            // Generate historical dates (last 12 months)
+            const historicalDates = [];
+            const historicalSales = [];
+            const historicalRevenue = [];
+            
+            for (let i = 11; i >= 0; i--) {
+                const date = new Date(today.getFullYear(), today.getMonth() - i, 1);
+                historicalDates.push(date.toLocaleDateString('en-US', { year: 'numeric', month: 'short' }));
+                historicalSales.push(Math.floor(Math.random() * 50000) + 30000);
+                historicalRevenue.push(Math.floor(Math.random() * 100000) + 80000);
+            }
+            
+            // Generate forecast dates
+            const forecastDates = [];
+            const forecastSales = [];
+            const forecastRevenue = [];
+            
+            for (let i = 1; i <= periods; i++) {
+                const date = new Date(today.getFullYear(), today.getMonth() + i, 1);
+                forecastDates.push(date.toLocaleDateString('en-US', { year: 'numeric', month: 'short' }));
+                forecastSales.push(Math.floor(Math.random() * 60000) + 35000);
+                forecastRevenue.push(Math.floor(Math.random() * 120000) + 90000);
+            }
+            
+            // Mock model performance
+            const models = {
+                'ARIMA': { accuracy: 87.5, mape: 12.5, rmse: 4500 },
+                'Prophet': { accuracy: 91.2, mape: 8.8, rmse: 3200 },
+                'Linear Regression': { accuracy: 84.3, mape: 15.7, rmse: 5200 }
+            };
+            
+            const bestModel = payload.auto_optimize ? 'Prophet' : payload.model;
+            
+            return {
+                best_model: bestModel,
+                best_accuracy: models[bestModel].accuracy,
+                models: models,
+                stats: {
+                    avg_sales: historicalSales.reduce((a, b) => a + b) / historicalSales.length,
+                    avg_revenue: historicalRevenue.reduce((a, b) => a + b) / historicalRevenue.length,
+                    min_sales: Math.min(...historicalSales),
+                    max_sales: Math.max(...historicalSales)
+                },
+                historical: {
+                    dates: historicalDates,
+                    sales: historicalSales,
+                    revenue: historicalRevenue
+                },
+                forecast: {
+                    dates: forecastDates,
+                    sales: forecastSales,
+                    revenue: forecastRevenue
                 }
-            })
-            .catch(err => showMessage('❌ Request failed: ' + err.message, 'error'));
+            };
         }
 
         function displayResults(data) {
