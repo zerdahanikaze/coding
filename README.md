@@ -49,3 +49,17 @@ Your CSV file should contain at least these columns:
 
 - Python 3.7+
 - See requirements.txt for dependencies
+
+## Deployment & Demo
+
+- Deploy the app on Streamlit Community Cloud for a hosted interactive dashboard. Connect your GitHub account and select this repo and `app.py` as the app entrypoint.
+- A GitHub Actions CI workflow (`.github/workflows/ci.yml`) runs on push and executes `run_forecast.py`, producing forecast CSVs which are uploaded as workflow artifacts.
+
+To run the forecasts locally (CLI):
+
+```bash
+D:/coding/.venv/Scripts/Activate.ps1
+python run_forecast.py --periods 6 --model all
+```
+
+Demo input is available at `data/demo_input.csv` and generated forecasts are saved to `data/forecasts/` by the runner.
