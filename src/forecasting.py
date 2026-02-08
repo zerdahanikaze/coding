@@ -15,6 +15,10 @@ def detect_frequency(dates):
     if len(dates) < 2:
         return 'MS'  # Default to month start
     
+    # Convert to pandas DatetimeIndex if needed
+    if not isinstance(dates, pd.DatetimeIndex):
+        dates = pd.to_datetime(dates)
+    
     # Calculate the most common difference
     diffs = (dates[1:] - dates[:-1]).days
     median_diff = np.median(diffs)
@@ -68,7 +72,7 @@ def forecast_sales(data, periods, model_choice, auto_config=True):
     data = data.set_index('date')
     
     # Detect frequency
-    freq = detect_frequency(data.index.values.astype('datetime64[D]').astype('object'))
+    freq = detect_frequency(data.index)
     
     # Forecast sales
     try:
