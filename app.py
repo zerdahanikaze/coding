@@ -225,58 +225,62 @@ if data is not None:
             # Report generation
             if st.session_state.last_forecast_data:
                 st.subheader("📄 Generate Report")
-                if st.button("📥 Download Word Report"):
-                    try:
-                        with st.spinner("Generating report..."):
-                            forecast_data_dict = st.session_state.last_forecast_data
-                            
-                            historical_data = {
-                                'dates': forecast_data_dict['df']['date'].dt.strftime('%Y-%m-%d').tolist(),
-                                'sales': forecast_data_dict['df']['sales'].round(2).tolist(),
-                                'revenue': forecast_data_dict['df']['revenue'].round(2).tolist()
+                
+                try:
+                    with st.spinner("Generating report..."):
+                        forecast_data_dict = st.session_state.last_forecast_data
+                        
+                        historical_data = {
+                            'dates': forecast_data_dict['df']['date'].dt.strftime('%Y-%m-%d').tolist(),
+                            'sales': forecast_data_dict['df']['sales'].round(2).tolist(),
+                            'revenue': forecast_data_dict['df']['revenue'].round(2).tolist()
+                        }
+                        
+                        forecast_data_for_report = {
+                            'dates': forecast_df['date'].dt.strftime('%Y-%m-%d').tolist(),
+                            'forecast_sales': forecast_df['forecast_sales'].round(2).tolist(),
+                            'forecast_revenue': forecast_df['forecast_revenue'].round(2).tolist()
+                        }
+                        
+                        model_results = {}
+                        for model, result in all_results.items():
+                            model_results[model] = {
+                                'accuracy': result.get('accuracy'),
+                                'mape': result.get('mape'),
+                                'rmse': result.get('rmse')
                             }
-                            
-                            forecast_data_for_report = {
-                                'dates': forecast_df['date'].dt.strftime('%Y-%m-%d').tolist(),
-                                'forecast_sales': forecast_df['forecast_sales'].round(2).tolist(),
-                                'forecast_revenue': forecast_df['forecast_revenue'].round(2).tolist()
-                            }
-                            
-                            model_results = {}
-                            for model, result in all_results.items():
-                                model_results[model] = {
-                                    'accuracy': result.get('accuracy'),
-                                    'mape': result.get('mape'),
-                                    'rmse': result.get('rmse')
-                                }
-                            
-                            stats = {
-                                'avg_sales': float(forecast_data_dict['df']['sales'].mean()),
-                                'avg_revenue': float(forecast_data_dict['df']['revenue'].mean()),
-                                'min_sales': float(forecast_data_dict['df']['sales'].min()),
-                                'max_sales': float(forecast_data_dict['df']['sales'].max())
-                            }
-                            
-                            report_path = generate_forecast_report(
-                                historical_data=historical_data,
-                                forecast_data=forecast_data_for_report,
-                                best_model=best_model,
-                                best_accuracy=best_accuracy,
-                                model_results=model_results,
-                                stats=stats,
-                                periods=forecast_periods
-                            )
-                            
-                            with open(report_path, "rb") as f:
-                                st.download_button(
-                                    label="⬇️ Click to Download Report",
-                                    data=f.read(),
-                                    file_name=os.path.basename(report_path),
-                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                                )
-                            st.success("✅ Report ready for download!")
-                    except Exception as e:
-                        st.error(f"❌ Report generation failed: {str(e)}")
+                        
+                        stats = {
+                            'avg_sales': float(forecast_data_dict['df']['sales'].mean()),
+                            'avg_revenue': float(forecast_data_dict['df']['revenue'].mean()),
+                            'min_sales': float(forecast_data_dict['df']['sales'].min()),
+                            'max_sales': float(forecast_data_dict['df']['sales'].max())
+                        }
+                        
+                        report_path = generate_forecast_report(
+                            historical_data=historical_data,
+                            forecast_data=forecast_data_for_report,
+                            best_model=best_model,
+                            best_accuracy=best_accuracy,
+                            model_results=model_results,
+                            stats=stats,
+                            periods=forecast_periods
+                        )
+                        
+                        # Read file and create download button
+                        with open(report_path, "rb") as f:
+                            report_bytes = f.read()
+                        
+                        st.download_button(
+                            label="📥 Download Word Report",
+                            data=report_bytes,
+                            file_name=os.path.basename(report_path),
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        )
+                        st.success("✅ Report generated successfully!")
+                except Exception as e:
+                    st.error(f"❌ Report generation failed: {str(e)}")
+                    st.info(f"Error details: {str(e)}")
             
         except Exception as e:
             st.error(f"❌ Forecasting failed: {str(e)}")
