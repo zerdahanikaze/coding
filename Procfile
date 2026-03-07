@@ -1,1 +1,1 @@
-web: gunicorn -w 4 -b 0.0.0.0:$PORT dashboard:app
+web: streamlit run app.py --server.port=$PORT --server.address=0.0.0.0

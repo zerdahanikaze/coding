@@ -2,11 +2,28 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from src.data_preprocessing import load_and_preprocess_data, detect_column_names
-from src.forecasting import forecast_sales
+from src.forecasting import forecast_sales, evaluate_models
+from src.word_reporter import generate_forecast_report
 import plotly.graph_objects as go
+import os
 
 st.set_page_config(page_title="Sales Forecasting Dashboard", layout="wide")
-st.title("Smart Sales and Revenue Forecasting Dashboard")
+st.title("🚀 Smart Sales and Revenue Forecasting Dashboard")
+
+# Available forecasting models
+AVAILABLE_MODELS = [
+    'Prophet',
+    'ARIMA', 
+    'Exponential Smoothing',
+    'SARIMA',
+    'Moving Average',
+    'Simple Exponential Smoothing',
+    'Linear Regression'
+]
+
+# Initialize session state
+if 'last_forecast_data' not in st.session_state:
+    st.session_state.last_forecast_data = None
 
 # Sidebar for inputs
 st.sidebar.header("📊 Data Upload and Configuration")
@@ -66,34 +83,94 @@ else:
 # Display data
 if data is not None:
     st.header("📊 Historical Data")
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("Total Records", len(data))
     with col2:
         st.metric("Date Range", f"{data['date'].min().date()} to {data['date'].max().date()}")
     with col3:
-        st.metric("Avg Sales", f"{data['sales'].mean():.2f}")
+        st.metric("Avg Sales", f"${data['sales'].mean():.2f}")
+    with col4:
+        st.metric("Avg Revenue", f"${data['revenue'].mean():.2f}")
     
     st.dataframe(data.head(10), use_container_width=True)
     
     # Forecast configuration
     st.sidebar.header("⚙️ Forecast Configuration")
     forecast_periods = st.sidebar.slider("Forecast periods", 1, 24, 6)
-    model_choice = st.sidebar.selectbox(
-        "Choose Forecasting Model",
-        ["ARIMA", "Prophet", "Linear Regression"],
-        help="ARIMA: Good for stationary data\nProphet: Good for seasonal patterns\nLinear Regression: Good for trends"
-    )
     
-    auto_config = st.sidebar.checkbox("Auto-configure model parameters", value=True, help="Let the system find best parameters")
+    # Model selection
+    st.sidebar.write("**Select Models to Compare:**")
+    use_auto_optimize = st.sidebar.checkbox("Auto-optimize (test all models)", value=True)
+    
+    if use_auto_optimize:
+        models_to_use = AVAILABLE_MODELS
+        st.sidebar.info("✓ Will test all models and pick the best")
+    else:
+        models_to_use = st.sidebar.multiselect(
+            "Choose models",
+            AVAILABLE_MODELS,
+            default=["Prophet", "ARIMA"]
+        )
+    
+    auto_config = st.sidebar.checkbox("Auto-configure model parameters", value=True)
     
     # Run forecast
     if st.sidebar.button("🚀 Generate Forecast", use_container_width=True):
         try:
-            with st.spinner(f"🔄 Generating forecast using {model_choice}..."):
-                forecast_df = forecast_sales(data, forecast_periods, model_choice, auto_config=auto_config)
+            with st.spinner("🔄 Evaluating models and generating forecast..."):
+                if use_auto_optimize:
+                    # Test all models
+                    results = evaluate_models(data, forecast_periods)
+                    all_results = results['results']
+                    best_model = results['best_model']
+                    best_accuracy = results['best_accuracy']
+                else:
+                    # Test selected models
+                    if not models_to_use:
+                        st.error("Please select at least one model")
+                        st.stop()
+                    
+                    results = evaluate_models(data, forecast_periods)
+                    all_results = {k: v for k, v in results['results'].items() if k in models_to_use}
+                    best_model = results['best_model'] if results['best_model'] in all_results else models_to_use[0]
+                    best_accuracy = results['best_accuracy']
+                
+                # Get best forecast
+                forecast_df = all_results[best_model]['forecast']
+                
+                # Store in session for report generation
+                st.session_state.last_forecast_data = {
+                    'df': data,
+                    'forecast_results': all_results,
+                    'best_model': best_model,
+                    'best_accuracy': best_accuracy,
+                    'periods': forecast_periods,
+                    'date_col': detected_cols['date'],
+                    'sales_col': detected_cols['sales']
+                }
             
-            st.header("📈 Forecast Results")
+            st.success("✅ Forecast generated successfully!")
+            
+            # Display best model info
+            st.header(f"📈 Best Model: {best_model}")
+            if best_accuracy:
+                st.metric("Accuracy (MAPE)", f"{best_accuracy:.2f}%")
+            
+            # Model comparison table
+            st.subheader("📊 Model Comparison")
+            comparison_data = []
+            for model, result in all_results.items():
+                comparison_data.append({
+                    'Model': model,
+                    'Accuracy (MAPE)': f"{result.get('mape', 'N/A'):.2f}%" if result.get('mape') else 'N/A',
+                    'RMSE': f"{result.get('rmse', 'N/A'):.2f}" if result.get('rmse') else 'N/A'
+                })
+            comparison_df = pd.DataFrame(comparison_data)
+            st.dataframe(comparison_df, use_container_width=True)
+            
+            # Forecast results
+            st.subheader("📋 Forecast Data")
             st.dataframe(forecast_df, use_container_width=True)
             
             # Visualizations side by side
@@ -116,7 +193,7 @@ if data is not None:
                 fig.update_layout(
                     title="Sales Forecast",
                     xaxis_title="Date",
-                    yaxis_title="Sales",
+                    yaxis_title="Sales ($)",
                     hovermode='x unified',
                     height=400
                 )
@@ -139,24 +216,80 @@ if data is not None:
                 fig2.update_layout(
                     title="Revenue Forecast",
                     xaxis_title="Date",
-                    yaxis_title="Revenue",
+                    yaxis_title="Revenue ($)",
                     hovermode='x unified',
                     height=400
                 )
                 st.plotly_chart(fig2, use_container_width=True)
             
-            st.success("✅ Forecast generated successfully!")
+            # Report generation
+            if st.session_state.last_forecast_data:
+                st.subheader("📄 Generate Report")
+                if st.button("📥 Download Word Report"):
+                    try:
+                        with st.spinner("Generating report..."):
+                            forecast_data_dict = st.session_state.last_forecast_data
+                            
+                            historical_data = {
+                                'dates': forecast_data_dict['df']['date'].dt.strftime('%Y-%m-%d').tolist(),
+                                'sales': forecast_data_dict['df']['sales'].round(2).tolist(),
+                                'revenue': forecast_data_dict['df']['revenue'].round(2).tolist()
+                            }
+                            
+                            forecast_data_for_report = {
+                                'dates': forecast_df['date'].dt.strftime('%Y-%m-%d').tolist(),
+                                'forecast_sales': forecast_df['forecast_sales'].round(2).tolist(),
+                                'forecast_revenue': forecast_df['forecast_revenue'].round(2).tolist()
+                            }
+                            
+                            model_results = {}
+                            for model, result in all_results.items():
+                                model_results[model] = {
+                                    'accuracy': result.get('accuracy'),
+                                    'mape': result.get('mape'),
+                                    'rmse': result.get('rmse')
+                                }
+                            
+                            stats = {
+                                'avg_sales': float(forecast_data_dict['df']['sales'].mean()),
+                                'avg_revenue': float(forecast_data_dict['df']['revenue'].mean()),
+                                'min_sales': float(forecast_data_dict['df']['sales'].min()),
+                                'max_sales': float(forecast_data_dict['df']['sales'].max())
+                            }
+                            
+                            report_path = generate_forecast_report(
+                                historical_data=historical_data,
+                                forecast_data=forecast_data_for_report,
+                                best_model=best_model,
+                                best_accuracy=best_accuracy,
+                                model_results=model_results,
+                                stats=stats,
+                                periods=forecast_periods
+                            )
+                            
+                            with open(report_path, "rb") as f:
+                                st.download_button(
+                                    label="⬇️ Click to Download Report",
+                                    data=f.read(),
+                                    file_name=os.path.basename(report_path),
+                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                                )
+                            st.success("✅ Report ready for download!")
+                    except Exception as e:
+                        st.error(f"❌ Report generation failed: {str(e)}")
             
         except Exception as e:
             st.error(f"❌ Forecasting failed: {str(e)}")
             st.info("Try a different model or check your data format.")
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("""
+st.sidebar.markdown(f"""
     ### 📋 Features
     - **Auto-detect** date, sales, and revenue columns
     - **Support** any CSV format
-    - **Multiple** forecasting models
+    - **{len(AVAILABLE_MODELS)} forecasting models** available
+    - **Model comparison** with accuracy metrics
     - **Flexible** forecast periods
+    - **Download reports** as Word documents
     - **Error handling** for invalid data
 """)
