@@ -7,13 +7,13 @@ import plotly.express as px
 import warnings
 warnings.filterwarnings('ignore')
 
-from src.forecasting import forecast_sales
+from src.forecasting import forecast_sales, recommend_best_model
 from src.data_preprocessing import load_and_preprocess_data
 from src.word_reporter import generate_peak_report
 
 # Page config
 st.set_page_config(
-    page_title="Sales Peak Forecast Dashboard",
+    page_title="Sales and Revenue Forecasting System",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -34,7 +34,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("📊 Sales Peak Forecast Dashboard")
+st.title("📊 Sales and Revenue Forecasting System")
 st.markdown("---")
 
 # Sidebar
@@ -81,6 +81,41 @@ if uploaded_file is not None:
             step=1
         )
         
+        # Model selection
+        st.sidebar.subheader("🤖 Forecasting Model")
+        
+        # Auto-select toggle
+        use_auto_model = st.sidebar.checkbox(
+            "🎯 Auto-Select Best Model",
+            value=True,
+            help="Let the system analyze your data and recommend the most accurate model"
+        )
+        
+        if use_auto_model:
+            st.sidebar.info("System will analyze your data and select the best performing model automatically.")
+            model_choice = None  # Will be determined automatically
+        else:
+            model_choice = st.sidebar.selectbox(
+                "Select Forecasting Model Manually",
+                [
+                    "Prophet",
+                    "ARIMA", 
+                    "Exponential Smoothing",
+                    "SARIMA",
+                    "Moving Average",
+                    "Simple Exponential Smoothing",
+                    "Linear Regression"
+                ],
+                help="Choose the forecasting algorithm to use\\n\\n"
+                     "• Prophet: Best for seasonal data\\n"
+                     "• ARIMA: For statistical time series\\n"
+                     "• Exponential Smoothing: Holt-Winters method\\n"
+                     "• SARIMA: Seasonal ARIMA for seasonal patterns\\n"
+                     "• Moving Average: Trend-based smoothing\\n"
+                     "• Simple Exponential Smoothing: Basic exponential decay\\n"
+                     "• Linear Regression: Simple trend extrapolation"
+            )
+        
         # Convert date column
         df[date_col] = pd.to_datetime(df[date_col])
         
@@ -88,7 +123,7 @@ if uploaded_file is not None:
         col1, col2 = st.columns([2, 1])
         
         with col1:
-            st.subheader("📈 Forecast & Peak Predictions")
+            st.subheader(f"📈 Sales & Revenue Forecast ({model_choice} Model)")
         
         with col2:
             if st.button("🎯 Analyze & Generate Report", key="analyze_btn"):
@@ -130,20 +165,33 @@ if uploaded_file is not None:
                 continue
             
             # Prepare data
-            product_data = product_data[[date_col, sales_col]].rename(
-                columns={date_col: 'date', sales_col: 'sales'}
-            )
-            product_data['revenue'] = product_data['sales']  # Use sales as revenue proxy
+            product_data = product_data[[date_col, sales_col]].copy()
+            product_data.columns = ['date', 'sales']
+            product_data['revenue'] = product_data['sales'].values
             product_data = product_data.sort_values('date').reset_index(drop=True)
+            
+            # Auto-select best model if enabled
+            selected_model = model_choice
+            model_info = None
+            
+            if use_auto_model:
+                try:
+                    model_info = recommend_best_model(product_data, forecast_periods, test_size=0.2)
+                    selected_model = model_info['best_model']
+                except Exception as e:
+                    st.warning(f"⚠️ Could not auto-select model for {product}, using Prophet: {str(e)}")
+                    selected_model = "Prophet"
             
             # Forecast
             try:
-                forecast_df = forecast_sales(product_data, forecast_periods, "Prophet", auto_config=True)
+                forecast_df = forecast_sales(product_data, forecast_periods, selected_model, auto_config=True)
                 
                 # Store results
                 forecast_results[product] = {
                     'historical': product_data,
-                    'forecast': forecast_df
+                    'forecast': forecast_df,
+                    'model': selected_model,
+                    'model_info': model_info
                 }
                 
                 # Find peak
@@ -194,7 +242,10 @@ if uploaded_file is not None:
             st.markdown("---")
             
             # Detailed Forecasts
-            st.subheader("📊 Detailed Forecasts by Product")
+            if use_auto_model:
+                st.subheader("📊 Sales & Revenue Forecasts (Auto-Selected Models)")
+            else:
+                st.subheader(f"📊 Sales & Revenue Forecasts ({model_choice} Model)")
             
             # Tabs for each product
             if len(products) > 1:
@@ -255,20 +306,21 @@ if uploaded_file is not None:
 else:
     # Welcome screen
     st.info("""
-    ### 👋 Welcome to Sales Peak Forecast Dashboard!
+    ### 👋 Welcome to Sales and Revenue Forecasting System!
     
-    This dashboard helps you identify when your products will reach peak sales performance.
+    Advanced forecasting system that predicts sales and revenue trends for your products using machine learning.
     
     **How to use:**
-    1. 📁 Upload a CSV file with your sales data
+    1. 📁 Upload a CSV file with your historical sales data
     2. 📋 Map your columns (Date, Product, Sales)
-    3. 🎯 Get peak predictions automatically
-    4. 📄 Export results to a professional Word document
+    3. 🤖 Choose your forecasting model (Prophet, ARIMA, or Linear Regression)
+    4. 🎯 Get automatic peak predictions and revenue forecasts
+    5. 📄 Export detailed analysis to a professional Word document
     
     **Required columns in your CSV:**
     - **Date**: Transaction date (any standard date format)
     - **Product**: Product or item name
-    - **Sales**: Sales quantity or revenue
+    - **Sales**: Sales quantity or revenue values
     
     **Example CSV format:**
     ```
@@ -293,17 +345,72 @@ else:
     st.markdown("---")
     st.markdown("""
     **Key Features:**
-    - ✨ Automatic product peak prediction
-    - 📈 Visual forecasts with interactive charts
-    - 📊 Multi-product analysis
+    - 🤖 Multiple forecasting models (Prophet, ARIMA, Linear Regression)
+    - 📈 Interactive visual forecasts and trend analysis
+    - 📊 Multi-product sales and revenue analysis
+    - 🎯 Automatic peak prediction and growth analysis
     - 📄 Professional Word report export
-    - 💡 Growth percentage analysis
+    - 💡 Data-driven business insights and recommendations
     """)
 
 def display_product_forecast(product, data, peak_predictions):
     """Display forecast visualization for a product"""
     historical = data['historical']
     forecast = data['forecast']
+    model_used = data.get('model', 'Unknown')
+    model_info = data.get('model_info', None)
+    
+    # Display model information if available
+    if model_info:
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric(
+                "🤖 Selected Model",
+                model_used
+            )
+        
+        with col2:
+            st.metric(
+                "📊 Forecast Accuracy",
+                f"{model_info['accuracy']:.1f}%"
+            )
+        
+        with col3:
+            st.metric(
+                "✨ Data Pattern",
+                "Seasonal" if model_info['characteristics'].get('has_seasonality') else 
+                "Trending" if model_info['characteristics'].get('has_trend') else 
+                "Stable"
+            )
+        
+        # Show why this model was selected
+        with st.expander("📖 Why this model was selected?"):
+            st.info(f"**Reason:** {model_info['reason']}")
+            
+            # Show data characteristics
+            st.write("**Data Characteristics:**")
+            chars = model_info['characteristics']
+            char_text = f"""
+            - Data Points: {chars.get('length', 'N/A')}
+            - Trend Strength: {'Strong ⬆️' if chars.get('has_trend') else 'Weak ➡️'}
+            - Seasonality: {'Present 📈' if chars.get('has_seasonality') else 'None ➡️'}
+            - Volatility: {'High 📊' if chars.get('is_noisy') else 'Low ✅'}
+            """
+            st.markdown(char_text)
+            
+            # Show model comparison
+            if model_info.get('model_accuracies'):
+                st.write("**Model Accuracy Comparison:**")
+                comparisons = model_info['model_accuracies']
+                # Sort by accuracy descending
+                sorted_models = sorted(comparisons.items(), key=lambda x: x[1], reverse=True)
+                
+                comparison_df = pd.DataFrame([
+                    {'Model': m[0], 'Accuracy': f"{m[1]:.1f}%", 'Status': '✅ Selected' if m[0] == model_used else ''}
+                    for m in sorted_models
+                ])
+                st.dataframe(comparison_df, use_container_width=True, hide_index=True)
     
     # Find peak info
     peak_info = [p for p in peak_predictions if p['Product'] == product][0]
@@ -346,7 +453,7 @@ def display_product_forecast(product, data, peak_predictions):
     
     # Update layout
     fig.update_layout(
-        title=f"📈 {product} - Sales Forecast",
+        title=f"📈 {product} - Sales Forecast ({model_used} Model)",
         xaxis_title="Date",
         yaxis_title="Sales",
         hovermode='x unified',

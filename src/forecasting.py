@@ -2,6 +2,8 @@ import pandas as pd
 import numpy as np
 from statsmodels.tsa.arima.model import ARIMA
 from statsmodels.tsa.stattools import adfuller
+from statsmodels.tsa.seasonal import seasonal_decompose
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
 from prophet import Prophet
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
@@ -56,6 +58,251 @@ def suggest_arima_order(series, p_range=(0,5), d_range=(0,2), q_range=(0,5)):
     
     return best_order
 
+def exponential_smoothing_forecast(series, periods, seasonal_periods=12):
+    """
+    Exponential Smoothing (Holt-Winters) forecasting.
+    """
+    try:
+        # Detect seasonality
+        if len(series) < seasonal_periods * 2:
+            seasonal_periods = max(4, len(series) // 4)
+        
+        model = ExponentialSmoothing(
+            series,
+            seasonal_periods=seasonal_periods,
+            trend='add',
+            seasonal='add',
+            initialization_method='estimated'
+        )
+        model_fit = model.fit(optimized=True)
+        forecast = model_fit.forecast(steps=periods)
+        return np.maximum(forecast.values, 0)  # Ensure non-negative
+    except Exception as e:
+        raise ValueError(f"Exponential Smoothing failed: {str(e)}")
+
+def sarima_forecast(series, periods, freq='MS'):
+    """
+    Seasonal ARIMA (SARIMA) forecasting.
+    """
+    try:
+        from statsmodels.tsa.statespace.sarimax import SARIMAX
+        
+        # Determine seasonal period based on frequency
+        if freq == 'D':
+            seasonal_period = 7  # Weekly
+        elif freq == 'W':
+            seasonal_period = 52  # Yearly
+        elif freq == 'MS':
+            seasonal_period = 12  # Yearly
+        else:
+            seasonal_period = 4   # Quarterly
+        
+        # Adjust seasonal period if series is too short
+        if len(series) < seasonal_period * 2:
+            seasonal_period = max(2, seasonal_period // 2)
+        
+        # Simple SARIMA order
+        order = (1, 1, 1)
+        seasonal_order = (1, 1, 1, seasonal_period)
+        
+        model = SARIMAX(series, order=order, seasonal_order=seasonal_order)
+        model_fit = model.fit(disp=False)
+        forecast = model_fit.forecast(steps=periods)
+        return np.maximum(forecast.values, 0)  # Ensure non-negative
+    except Exception as e:
+        raise ValueError(f"SARIMA failed: {str(e)}")
+
+def moving_average_forecast(series, periods, window=3):
+    """
+    Moving Average based forecasting.
+    """
+    try:
+        # Use exponential moving average for more weight on recent data
+        ema = series.ewm(span=min(window, len(series))).mean()
+        
+        # Get last value and trend
+        last_value = ema.iloc[-1]
+        trend = (ema.iloc[-1] - ema.iloc[-min(5, len(series))]) / min(5, len(series))
+        
+        # Generate forecast
+        forecast = np.array([last_value + (trend * i) for i in range(1, periods + 1)])
+        return np.maximum(forecast, 0)  # Ensure non-negative
+    except Exception as e:
+        raise ValueError(f"Moving Average failed: {str(e)}")
+
+def simple_exponential_smoothing_forecast(series, periods, alpha=0.3):
+    """
+    Simple Exponential Smoothing forecasting.
+    """
+    try:
+        from statsmodels.tsa.holtwinters import SimpleExpSmoothing
+        model = SimpleExpSmoothing(series)
+        model_fit = model.fit(smoothing_level=alpha, optimized=False)
+        forecast = model_fit.forecast(steps=periods)
+        return np.maximum(forecast.values, 0)  # Ensure non-negative
+    except Exception as e:
+        raise ValueError(f"Simple Exponential Smoothing failed: {str(e)}")
+
+def analyze_data_characteristics(series):
+    """
+    Analyze time series data to detect patterns and characteristics.
+    
+    Returns:
+    - Dictionary with characteristics and recommended models
+    """
+    try:
+        characteristics = {
+            'length': len(series),
+            'mean': series.mean(),
+            'std': series.std(),
+            'cv': series.std() / series.mean() if series.mean() != 0 else 0,  # Coefficient of variation
+        }
+        
+        # Detect trend
+        x = np.arange(len(series))
+        z = np.polyfit(x, series.values, 1)
+        trend_strength = abs(z[0]) / series.std() if series.std() > 0 else 0
+        characteristics['trend_strength'] = trend_strength
+        characteristics['has_trend'] = trend_strength > 0.1
+        
+        # Detect seasonality using autocorrelation
+        if len(series) >= 4:
+            acf_values = [series.autocorr(lag=lag) for lag in range(1, min(13, len(series)//2))]
+            max_acf = max(acf_values) if acf_values else 0
+            characteristics['seasonality_strength'] = max_acf
+            characteristics['has_seasonality'] = max_acf > 0.3
+        else:
+            characteristics['seasonality_strength'] = 0
+            characteristics['has_seasonality'] = False
+        
+        # Detect noise (volatility)
+        returns = series.pct_change().dropna()
+        characteristics['volatility'] = returns.std() if len(returns) > 0 else 0
+        characteristics['is_noisy'] = characteristics['volatility'] > 0.1
+        
+        # Stationarity test
+        try:
+            adf_result = adfuller(series, autolag='AIC')
+            characteristics['is_stationary'] = adf_result[1] < 0.05
+        except:
+            characteristics['is_stationary'] = False
+        
+        return characteristics
+    except Exception as e:
+        return {'error': str(e), 'length': len(series)}
+
+def recommend_best_model(data, periods, test_size=0.2):
+    """
+    Automatically evaluate all models and recommend the best one based on accuracy.
+    
+    Parameters:
+    - data: preprocessed dataframe with date, sales, revenue
+    - periods: forecast periods
+    - test_size: proportion of data to use for testing
+    
+    Returns:
+    - Dictionary with best_model, accuracy, characteristics, and detailed results
+    """
+    data = data.copy()
+    data['date'] = pd.to_datetime(data['date'])
+    
+    # Analyze data characteristics
+    characteristics = analyze_data_characteristics(data['sales'])
+    
+    # Split data for testing
+    split_idx = int(len(data) * (1 - test_size))
+    train = data.iloc[:split_idx].copy()
+    test = data.iloc[split_idx:].copy()
+    
+    # Ensure we have enough test data
+    if len(test) < 2:
+        test_size = 0.15
+        split_idx = int(len(data) * (1 - test_size))
+        train = data.iloc[:split_idx].copy()
+        test = data.iloc[split_idx:].copy()
+    
+    models_to_test = ['Prophet', 'ARIMA', 'Exponential Smoothing', 'SARIMA', 'Moving Average', 'Linear Regression']
+    results = {}
+    best_model = None
+    best_accuracy = -np.inf
+    model_accuracies = {}
+    
+    for model_name in models_to_test:
+        try:
+            # Train and forecast
+            forecast_df = forecast_sales(train, len(test), model_name, auto_config=True)
+            
+            # Calculate accuracy
+            if len(forecast_df) >= len(test):
+                predicted = forecast_df['forecast_sales'].values[:len(test)]
+                actual = test['sales'].values
+                
+                # Ensure no NaN values
+                valid_idx = ~(np.isnan(predicted) | np.isnan(actual))
+                if valid_idx.sum() > 0:
+                    predicted = predicted[valid_idx]
+                    actual = actual[valid_idx]
+                    
+                    mae = np.mean(np.abs(actual - predicted))
+                    rmse = np.sqrt(np.mean((actual - predicted) ** 2))
+                    mape = np.mean(np.abs((actual - predicted) / actual)) * 100 if np.all(actual != 0) else 100
+                    
+                    # Accuracy as percentage (0-100)
+                    accuracy = max(0, 100 - mape) if mape < 100 else 0
+                    
+                    results[model_name] = {
+                        'accuracy': round(accuracy, 2),
+                        'mae': round(mae, 2),
+                        'rmse': round(rmse, 2),
+                        'mape': round(mape, 2)
+                    }
+                    model_accuracies[model_name] = accuracy
+                    
+                    if accuracy > best_accuracy:
+                        best_accuracy = accuracy
+                        best_model = model_name
+        except Exception as e:
+            results[model_name] = {
+                'accuracy': 0,
+                'mae': np.inf,
+                'rmse': np.inf,
+                'mape': np.inf,
+                'error': str(e)
+            }
+    
+    # If no model succeeded, recommend based on characteristics
+    if best_model is None:
+        if characteristics.get('has_seasonality', False):
+            best_model = 'SARIMA'
+        elif characteristics.get('has_trend', False):
+            best_model = 'Exponential Smoothing'
+        else:
+            best_model = 'Prophet'
+    
+    # Determine why this model was selected
+    reason = ""
+    if characteristics.get('has_seasonality', False) and characteristics.get('has_trend', False):
+        reason = "Data has clear seasonality and trend. Selected model handles both components."
+    elif characteristics.get('has_seasonality', False):
+        reason = "Data shows seasonal patterns. Selected model captures seasonality well."
+    elif characteristics.get('has_trend', False):
+        reason = "Data has strong trend component. Selected model follows trends effectively."
+    elif characteristics.get('is_noisy', False):
+        reason = "Data is noisy. Selected model smooths fluctuations effectively."
+    elif characteristics.get('is_stationary', False):
+        reason = "Data is stationary. Selected model suited for stationary series."
+    else:
+        reason = "Model selected based on comparative accuracy testing."
+    
+    return {
+        'best_model': best_model,
+        'accuracy': round(best_accuracy, 2),
+        'reason': reason,
+        'characteristics': characteristics,
+        'model_accuracies': model_accuracies,
+        'detailed_results': results
+    }
+
 def forecast_sales(data, periods, model_choice, auto_config=True):
     """
     Forecast sales and revenue using the chosen model.
@@ -63,7 +310,7 @@ def forecast_sales(data, periods, model_choice, auto_config=True):
     Parameters:
     - data: preprocessed dataframe with date, sales, revenue
     - periods: number of periods to forecast
-    - model_choice: 'ARIMA', 'Prophet', or 'Linear Regression'
+    - model_choice: 'ARIMA', 'Prophet', 'Linear Regression', 'Exponential Smoothing', 'SARIMA', or 'Moving Average'
     - auto_config: if True, auto-detect best parameters
     """
     # Prepare data
@@ -82,6 +329,14 @@ def forecast_sales(data, periods, model_choice, auto_config=True):
             sales_forecast = prophet_forecast(data, periods, freq)
         elif model_choice == "Linear Regression":
             sales_forecast = linear_regression_forecast(data['sales'], periods)
+        elif model_choice == "Exponential Smoothing":
+            sales_forecast = exponential_smoothing_forecast(data['sales'], periods)
+        elif model_choice == "SARIMA":
+            sales_forecast = sarima_forecast(data['sales'], periods, freq)
+        elif model_choice == "Moving Average":
+            sales_forecast = moving_average_forecast(data['sales'], periods)
+        elif model_choice == "Simple Exponential Smoothing":
+            sales_forecast = simple_exponential_smoothing_forecast(data['sales'], periods)
         else:
             raise ValueError(f"Unknown model: {model_choice}")
     except Exception as e:
@@ -179,6 +434,14 @@ def forecast_revenue(data, sales_forecast, model_choice, periods, freq):
         )
     elif model_choice == "Linear Regression":
         revenue = linear_regression_forecast(data['revenue'], periods)
+    elif model_choice == "Exponential Smoothing":
+        revenue = exponential_smoothing_forecast(data['revenue'], periods)
+    elif model_choice == "SARIMA":
+        revenue = sarima_forecast(data['revenue'], periods, freq)
+    elif model_choice == "Moving Average":
+        revenue = moving_average_forecast(data['revenue'], periods)
+    elif model_choice == "Simple Exponential Smoothing":
+        revenue = simple_exponential_smoothing_forecast(data['revenue'], periods)
     else:
         revenue = sales_forecast * ((data['revenue'] / data['sales']).mean())
     
@@ -213,7 +476,7 @@ def evaluate_models(data, periods, test_size=0.2):
     train = data.iloc[:split_idx].copy()
     test = data.iloc[split_idx:].copy()
     
-    models_to_test = ['ARIMA', 'Prophet', 'Linear Regression']
+    models_to_test = ['Prophet', 'ARIMA', 'Exponential Smoothing', 'SARIMA', 'Moving Average', 'Simple Exponential Smoothing', 'Linear Regression']
     results = {}
     best_model = None
     best_accuracy = float('inf')
