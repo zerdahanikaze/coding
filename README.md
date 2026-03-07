@@ -1,13 +1,31 @@
 # Smart Sales and Revenue Forecasting System
 
-A Python-based application for forecasting sales and revenue using historical business data. The system adapts to various business datasets and provides interactive visualizations through a Streamlit dashboard.
+A Python-based application for forecasting sales and revenue using historical business data. This system features a user-friendly dashboard that identifies when products will reach peak performance and generates professional Word reports.
 
 ## Features
 
-- **Adaptive Data Handling**: Accepts CSV files with date, sales, and revenue columns
-- **Multiple Forecasting Models**: ARIMA, Facebook Prophet, and Linear Regression
-- **Interactive Dashboard**: Built with Streamlit for easy visualization
-- **Flexible Forecast Periods**: Configure forecast length from 1 to 24 months
+✨ **Core Features**
+- 📊 **Multi-Product Analysis**: Analyze multiple products simultaneously
+- 🎯 **Peak Predictions**: Automatically identifies when each product will reach peak sales
+- 📈 **Advanced Forecasting**: Uses Prophet, ARIMA, and Linear Regression models
+- 📄 **Word Export**: Generate professional reports in Word format
+- 📉 **Interactive Charts**: Visual forecasts with growth metrics
+- 💡 **Growth Analysis**: Shows expected growth percentages for each product
+- 🔍 **Data Flexibility**: Works with various CSV formats
+
+## Dashboard Features
+
+### Peak Prediction Dashboard (`app_dashboard.py`)
+The main dashboard for end-users featuring:
+- **Simple Data Upload**: Select Date, Product, and Sales columns
+- **Automatic Peak Detection**: System finds peak months for each product
+- **Clear Metrics Display**: 
+  - Peak Month prediction
+  - Peak Sales Value
+  - Expected Growth %
+  - Days Until Peak
+- **Interactive Visualizations**: Charts showing historical data and forecasts
+- **Professional Reports**: Export results to Word format with insights and recommendations
 
 ## Installation
 
@@ -19,35 +37,85 @@ A Python-based application for forecasting sales and revenue using historical bu
 
 ## Usage
 
-1. Run the dashboard:
-   ```
-   streamlit run app.py
-   ```
+### Launch the Peak Prediction Dashboard
 
-2. Upload your historical data (CSV format) or use the provided sample data
+```bash
+streamlit run app_dashboard.py
+```
 
-3. Configure forecast parameters:
-   - Select forecasting model
-   - Set forecast periods
+Then:
+1. Upload your CSV file with sales data
+2. Map columns: Date, Product (optional), and Sales
+3. Set forecast period (3-24 months)
+4. View peak predictions automatically
+5. Export results to Word report
 
-4. View historical data and forecasts with interactive charts
+### Sample Data Format
 
-## Data Format
+Required columns:
+- **Date**: Transaction date (YYYY-MM-DD or flexible format)
+- **Product**: Product or item name (optional - analysis works with single product too)
+- **Sales**: Sales quantity or revenue value
 
-Your CSV file should contain at least these columns:
-- `date`: Date in YYYY-MM-DD format
-- `sales`: Sales figures
-- `revenue`: Revenue figures
+Example:
+```csv
+Date,Product,Sales
+2023-01-01,Laptop,450
+2023-02-01,Laptop,480
+2023-01-01,Smartphone,320
+2023-02-01,Smartphone,340
+```
 
-## Models
+A sample dataset is provided at: `data/products_sales_data.csv`
 
-- **ARIMA**: Statistical model for time series forecasting
-- **Prophet**: Facebook's forecasting tool for seasonal data
+## Example Output
+
+**Peak Predictions Summary:**
+- 📦 **Laptop**: Peaks in December 2024 (750 units, +25.4% growth)
+- 📦 **Smartphone**: Peaks in November 2024 (540 units, +18.8% growth)
+- 📦 **Tablet**: Peaks in December 2024 (375 units, +14.3% growth)
+
+## Forecasting Models
+
+- **Prophet**: Recommended for seasonal data with trend changes (default)
+- **ARIMA**: Statistical model for time series with complex patterns
 - **Linear Regression**: Simple trend-based forecasting
+
+## Report Export
+
+The Word export includes:
+- Executive Summary
+- Key findings and statistics
+- Peak predictions table
+- Detailed analysis per product
+- Growth metrics and recommendations
+- Methodology explanation
+- Generated timestamp
+
+## Project Structure
+
+```
+.
+├── app_dashboard.py           # Main Peak Prediction Dashboard
+├── src/
+│   ├── data_preprocessing.py  # Data handling
+│   ├── forecasting.py         # Forecasting models
+│   └── word_reporter.py       # Word report generation
+├── data/
+│   ├── sample_sales_data.csv
+│   ├── products_sales_data.csv (sample with multiple products)
+│   └── forecasts/
+├── requirements.txt
+└── README.md
+```
 
 ## Requirements
 
 - Python 3.7+
+- pandas, numpy, scikit-learn
+- streamlit, plotly
+- prophet, statsmodels
+- python-docx (for Word export)
 - See requirements.txt for dependencies
 
 ## Deployment & Demo
