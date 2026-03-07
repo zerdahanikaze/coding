@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 from src.data_preprocessing import load_and_preprocess_data, detect_column_names
 from src.forecasting import forecast_sales, evaluate_models, recommend_best_model
-from src.word_reporter import generate_peak_report
+from src.word_reporter import generate_peak_report, generate_forecast_report
 import json
 from werkzeug.utils import secure_filename
 import os
@@ -202,6 +202,92 @@ def load_sample():
                 'avg_revenue': float(df['revenue'].mean())
             }
         })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/generate-report', methods=['POST'])
+def create_report():
+    try:
+        global last_forecast_data
+        
+        if not last_forecast_data or 'df' not in last_forecast_data:
+            return jsonify({'error': 'No forecast data available. Please run a forecast first.'}), 400
+        
+        df = last_forecast_data['df']
+        all_results = last_forecast_data['forecast_results']
+        best_model = last_forecast_data['best_model']
+        best_accuracy = last_forecast_data['best_accuracy']
+        periods = last_forecast_data['periods']
+        
+        # Get forecast data for best model
+        if best_model in all_results:
+            forecast_df = all_results[best_model]['forecast']
+        else:
+            forecast_df = list(all_results.values())[0]['forecast']
+        
+        # Prepare historical data
+        historical_data = {
+            'dates': df['date'].dt.strftime('%Y-%m-%d').tolist(),
+            'sales': df['sales'].round(2).tolist(),
+            'revenue': df['revenue'].round(2).tolist()
+        }
+        
+        # Prepare forecast data
+        forecast_data = {
+            'dates': forecast_df['date'].dt.strftime('%Y-%m-%d').tolist(),
+            'forecast_sales': forecast_df['forecast_sales'].round(2).tolist(),
+            'forecast_revenue': forecast_df['forecast_revenue'].round(2).tolist()
+        }
+        
+        # Get model results
+        model_results = {}
+        for model, result in all_results.items():
+            model_results[model] = {
+                'accuracy': result.get('accuracy'),
+                'mape': result.get('mape'),
+                'rmse': result.get('rmse')
+            }
+        
+        # Stats
+        stats = {
+            'avg_sales': float(df['sales'].mean()),
+            'avg_revenue': float(df['revenue'].mean()),
+            'min_sales': float(df['sales'].min()),
+            'max_sales': float(df['sales'].max())
+        }
+        
+        # Generate report
+        report_path = generate_forecast_report(
+            historical_data=historical_data,
+            forecast_data=forecast_data,
+            best_model=best_model,
+            best_accuracy=best_accuracy,
+            model_results=model_results,
+            stats=stats,
+            periods=periods
+        )
+        
+        return jsonify({
+            'success': True,
+            'report_file': os.path.basename(report_path),
+            'message': 'Report generated successfully'
+        })
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/download-report/<filename>', methods=['GET'])
+def download_report(filename):
+    try:
+        # Security: prevent directory traversal
+        filename = secure_filename(filename)
+        filepath = os.path.join('reports', filename)
+        
+        if not os.path.exists(filepath):
+            return jsonify({'error': 'Report not found'}), 404
+        
+        return send_file(filepath, as_attachment=True, download_name=filename)
+    
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
