@@ -11,3 +11,4 @@ joblib
 flask
 werkzeug
 python-docx
+gunicorn
