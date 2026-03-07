@@ -1,8 +1,9 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_file
 import pandas as pd
 import numpy as np
 from src.data_preprocessing import load_and_preprocess_data, detect_column_names
-from src.forecasting import forecast_sales, evaluate_models
+from src.forecasting import forecast_sales, evaluate_models, recommend_best_model
+from src.word_reporter import generate_peak_report
 import json
 from werkzeug.utils import secure_filename
 import os
@@ -14,12 +15,34 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 ALLOWED_EXTENSIONS = {'csv'}
 
+# Available forecasting models
+AVAILABLE_MODELS = [
+    'Prophet',
+    'ARIMA', 
+    'Exponential Smoothing',
+    'SARIMA',
+    'Moving Average',
+    'Simple Exponential Smoothing',
+    'Linear Regression'
+]
+
+# Global variable to store last forecast for report generation
+last_forecast_data = {}
+
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 @app.route('/')
 def index():
     return render_template('index.html')
+
+@app.route('/api/models', methods=['GET'])
+def get_models():
+    """Get list of available forecasting models"""
+    return jsonify({
+        'models': AVAILABLE_MODELS,
+        'count': len(AVAILABLE_MODELS)
+    })
 
 @app.route('/api/upload', methods=['POST'])
 def upload_file():
@@ -69,6 +92,7 @@ def run_forecast():
         revenue_col = data.get('revenue_col')
         periods = int(data.get('periods', 6))
         auto_optimize = data.get('auto_optimize', True)
+        selected_models = data.get('models', [])  # List of selected models
         
         if not filepath or not os.path.exists(filepath):
             return jsonify({'error': 'Invalid file path'}), 400
@@ -77,20 +101,33 @@ def run_forecast():
         df = load_and_preprocess_data(filepath, date_col, sales_col, revenue_col)
         
         if auto_optimize:
-            # Evaluate all models and pick best
-            results = evaluate_models(df, periods)
-            best_model = results['best_model']
-            best_accuracy = results['best_accuracy']
-            all_results = results['results']
+            # Evaluate multiple models and return all results
+            if selected_models and len(selected_models) > 0:
+                # Test only selected models
+                results = evaluate_models(df, periods)
+                # Filter to selected models
+                all_results = {k: v for k, v in results['results'].items() if k in selected_models}
+                best_model = results['best_model']
+                best_accuracy = results['best_accuracy']
+            else:
+                # Test all available models
+                results = evaluate_models(df, periods)
+                all_results = results['results']
+                best_model = results['best_model']
+                best_accuracy = results['best_accuracy']
         else:
+            # Use specific model
             model = data.get('model', 'Prophet')
+            if model not in AVAILABLE_MODELS:
+                return jsonify({'error': f'Unknown model: {model}'}), 400
+                
             forecast_df = forecast_sales(df, periods, model, auto_config=True)
             best_model = model
             all_results = {model: {'forecast': forecast_df, 'accuracy': None}}
             best_accuracy = None
         
         # Get best forecast
-        forecast_df = all_results[best_model]['forecast']
+        forecast_df = all_results[best_model]['forecast'] if best_model in all_results else list(all_results.values())[0]['forecast']
         
         # Prepare response
         historical_data = {
@@ -112,6 +149,18 @@ def run_forecast():
                 'mape': result.get('mape'),
                 'rmse': result.get('rmse')
             }
+        
+        # Store forecast data for report generation
+        global last_forecast_data
+        last_forecast_data = {
+            'df': df,
+            'forecast_results': all_results,
+            'best_model': best_model,
+            'best_accuracy': best_accuracy,
+            'periods': periods,
+            'date_col': date_col,
+            'sales_col': sales_col
+        }
         
         return jsonify({
             'success': True,

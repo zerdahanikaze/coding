@@ -156,6 +156,43 @@
             flex-direction: column;
         }
 
+        .models-checkbox-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 12px;
+            margin-top: 12px;
+        }
+
+        .model-checkbox {
+            display: flex;
+            align-items: center;
+            background: #f9f9f9;
+            padding: 10px 12px;
+            border-radius: 8px;
+            border: 2px solid #ddd;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .model-checkbox:hover {
+            border-color: #667eea;
+            background: #f0f2ff;
+        }
+
+        .model-checkbox input {
+            margin-right: 8px;
+            cursor: pointer;
+            width: 18px;
+            height: 18px;
+        }
+
+        .model-checkbox label {
+            margin: 0;
+            font-weight: 500;
+            cursor: pointer;
+            font-size: 0.95em;
+        }
+
         label {
             font-weight: 600;
             color: #333;
@@ -459,13 +496,53 @@
                 <label class="checkbox-label" for="autoOptimize">🤖 Auto-optimize model selection (test all models and pick best)</label>
             </div>
 
-            <div class="config-item" id="modelSelectDiv" style="width: 250px; display: none;">
-                <label for="modelSelect">Select Model</label>
+            <!-- Single Model Selection -->
+            <div class="config-item" id="modelSelectDiv" style="width: 100%; display: none;">
+                <label for="modelSelect">📊 Select Forecasting Model</label>
                 <select id="modelSelect">
-                    <option value="ARIMA">ARIMA</option>
-                    <option value="Prophet">Prophet</option>
-                    <option value="Linear Regression">Linear Regression</option>
+                    <option value="Prophet">📈 Prophet - Robust with seasonality handling</option>
+                    <option value="ARIMA">📊 ARIMA - Classic time series model</option>
+                    <option value="Exponential Smoothing">⚡ Exponential Smoothing - Smooth trends</option>
+                    <option value="SARIMA">🌊 SARIMA - Seasonal ARIMA</option>
+                    <option value="Moving Average">📐 Moving Average - Simple trend</option>
+                    <option value="Simple Exponential Smoothing">✨ Simple Exponential Smoothing - Basic smoothing</option>
+                    <option value="Linear Regression">📉 Linear Regression - Linear trend</option>
                 </select>
+            </div>
+
+            <!-- Multiple Model Selection for Auto-Optimize -->
+            <div id="multiModelDiv" style="width: 100%; display: none;">
+                <label>📊 Select Models to Compare (leave unchecked to test all)</label>
+                <div class="models-checkbox-grid">
+                    <div class="model-checkbox">
+                        <input type="checkbox" id="model_prophet" value="Prophet" class="model-check">
+                        <label for="model_prophet">📈 Prophet</label>
+                    </div>
+                    <div class="model-checkbox">
+                        <input type="checkbox" id="model_arima" value="ARIMA" class="model-check">
+                        <label for="model_arima">📊 ARIMA</label>
+                    </div>
+                    <div class="model-checkbox">
+                        <input type="checkbox" id="model_es" value="Exponential Smoothing" class="model-check">
+                        <label for="model_es">⚡ Exp. Smoothing</label>
+                    </div>
+                    <div class="model-checkbox">
+                        <input type="checkbox" id="model_sarima" value="SARIMA" class="model-check">
+                        <label for="model_sarima">🌊 SARIMA</label>
+                    </div>
+                    <div class="model-checkbox">
+                        <input type="checkbox" id="model_ma" value="Moving Average" class="model-check">
+                        <label for="model_ma">📐 Mov. Avg</label>
+                    </div>
+                    <div class="model-checkbox">
+                        <input type="checkbox" id="model_ses" value="Simple Exponential Smoothing" class="model-check">
+                        <label for="model_ses">✨ Simple ES</label>
+                    </div>
+                    <div class="model-checkbox">
+                        <input type="checkbox" id="model_lr" value="Linear Regression" class="model-check">
+                        <label for="model_lr">📉 Lin. Regr.</label>
+                    </div>
+                </div>
             </div>
 
             <div class="button-group">
@@ -624,12 +701,22 @@
 
         document.getElementById('autoOptimize').addEventListener('change', (e) => {
             document.getElementById('modelSelectDiv').style.display = e.target.checked ? 'none' : 'block';
+            document.getElementById('multiModelDiv').style.display = e.target.checked ? 'block' : 'none';
         });
 
         function runForecast() {
             if (!currentData) {
                 showMessage('❌ Please upload a file first', 'error');
                 return;
+            }
+
+            // Get selected models
+            const selectedModels = [];
+            if (document.getElementById('autoOptimize').checked) {
+                const checkboxes = document.querySelectorAll('.model-check:checked');
+                checkboxes.forEach(cb => {
+                    selectedModels.push(cb.value);
+                });
             }
 
             const payload = {
@@ -639,17 +726,32 @@
                 revenue_col: document.getElementById('revenueCol').value,
                 periods: document.getElementById('periods').value,
                 auto_optimize: document.getElementById('autoOptimize').checked,
-                model: document.getElementById('modelSelect').value
+                model: document.getElementById('modelSelect').value,
+                models: selectedModels
             };
 
             document.getElementById('messageContainer').innerHTML = '<div class="loading"><div class="spinner"></div>🔄 Generating forecast and optimizing model selection...</div>';
 
-            // Mock forecast generation
-            setTimeout(() => {
-                const mockData = generateMockForecast(payload);
-                displayResults(mockData);
-                showMessage(`✅ Forecast complete! Best model: ${mockData.best_model} (${mockData.best_accuracy}% accuracy)`, 'success');
-            }, 2000);
+            // Make API call
+            fetch('/api/forecast', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(payload)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    displayResults(data);
+                    showMessage(`✅ Forecast complete! Best model: ${data.best_model} (${data.best_accuracy}% accuracy)`, 'success');
+                } else {
+                    showMessage(`❌ Error: ${data.error}`, 'error');
+                }
+            })
+            .catch(error => {
+                showMessage(`❌ Request failed: ${error.message}`, 'error');
+            });
         }
 
         function generateMockForecast(payload) {
