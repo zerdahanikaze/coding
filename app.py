@@ -6,6 +6,7 @@ from src.forecasting import forecast_sales, evaluate_models
 from src.word_reporter import generate_forecast_report
 import plotly.graph_objects as go
 import os
+import altair as alt
 
 st.set_page_config(page_title="Sales Forecasting Dashboard", layout="wide")
 st.title("🚀 Smart Sales and Revenue Forecasting Dashboard")
