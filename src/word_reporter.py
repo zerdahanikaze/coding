@@ -1,14 +1,221 @@
 """
-Word report generator for Sales Forecasting Dashboard.
-Generates a .docx report using the docx npm package via Node.js.
+word_reporter.py — Pure Python Word report generator using python-docx.
+No Node.js or npm required.
+
+Install dependency:
+    pip install python-docx
 """
+
 import os
-import json
-import subprocess
 import tempfile
 from datetime import datetime
 from typing import Optional
 
+from docx import Document
+from docx.shared import Pt, RGBColor, Inches, Cm
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_ALIGN_VERTICAL, WD_TABLE_ALIGNMENT
+from docx.oxml.ns import qn
+from docx.oxml import OxmlElement
+
+
+# ── Colour palette ─────────────────────────────────────────────────────────────
+PRIMARY      = RGBColor(0x1E, 0x3A, 0x5F)
+ACCENT       = RGBColor(0x2E, 0x86, 0xC1)
+GREEN        = RGBColor(0x1E, 0x84, 0x49)
+RED          = RGBColor(0xC0, 0x39, 0x2B)
+ORANGE       = RGBColor(0xD3, 0x54, 0x00)
+MID_GREY     = RGBColor(0x7F, 0x8C, 0x8D)
+DARK_TEXT    = RGBColor(0x1C, 0x28, 0x33)
+WHITE        = RGBColor(0xFF, 0xFF, 0xFF)
+
+BG_LIGHT_BLUE   = "D6EAF8"
+BG_LIGHT_GREEN  = "D5F5E3"
+BG_LIGHT_RED    = "FADBD8"
+BG_LIGHT_ORANGE = "FDEBD0"
+BG_GREY         = "F2F3F4"
+BG_WHITE        = "FFFFFF"
+BG_PRIMARY      = "1E3A5F"
+BG_ACCENT       = "2E86C1"
+
+
+# ── Low-level XML helpers ──────────────────────────────────────────────────────
+
+def _set_cell_bg(cell, hex_color: str):
+    """Set table cell background colour via raw XML."""
+    tc = cell._tc
+    tcPr = tc.get_or_add_tcPr()
+    shd = OxmlElement('w:shd')
+    shd.set(qn('w:val'), 'clear')
+    shd.set(qn('w:color'), 'auto')
+    shd.set(qn('w:fill'), hex_color)
+    tcPr.append(shd)
+
+
+def _set_cell_margins(cell, top=80, bottom=80, left=120, right=120):
+    tc = cell._tc
+    tcPr = tc.get_or_add_tcPr()
+    tcMar = OxmlElement('w:tcMar')
+    for side, val in [('top', top), ('bottom', bottom), ('left', left), ('right', right)]:
+        el = OxmlElement(f'w:{side}')
+        el.set(qn('w:w'), str(val))
+        el.set(qn('w:type'), 'dxa')
+        tcMar.append(el)
+    tcPr.append(tcMar)
+
+
+def _set_row_height(row, height_twips: int):
+    tr = row._tr
+    trPr = tr.get_or_add_trPr()
+    trHeight = OxmlElement('w:trHeight')
+    trHeight.set(qn('w:val'), str(height_twips))
+    trPr.append(trHeight)
+
+
+def _para_border_bottom(para, color="2E86C1", size=12):
+    pPr = para._p.get_or_add_pPr()
+    pBdr = OxmlElement('w:pBdr')
+    bottom = OxmlElement('w:bottom')
+    bottom.set(qn('w:val'), 'single')
+    bottom.set(qn('w:sz'), str(size))
+    bottom.set(qn('w:space'), '1')
+    bottom.set(qn('w:color'), color)
+    pBdr.append(bottom)
+    pPr.append(pBdr)
+
+
+# ── Style helpers ──────────────────────────────────────────────────────────────
+
+def _run(para, text: str, bold=False, italic=False, size_pt=11,
+         color: RGBColor = None, font="Arial"):
+    run = para.add_run(str(text))
+    run.bold = bold
+    run.italic = italic
+    run.font.name = font
+    run.font.size = Pt(size_pt)
+    if color:
+        run.font.color.rgb = color
+    return run
+
+
+def _heading(doc: Document, text: str, level=1):
+    para = doc.add_paragraph()
+    para.paragraph_format.space_before = Pt(18)
+    para.paragraph_format.space_after  = Pt(6)
+    _run(para, text, bold=True,
+         size_pt=16 if level == 1 else 13,
+         color=PRIMARY if level == 1 else ACCENT)
+    if level == 1:
+        _para_border_bottom(para, color="2E86C1", size=8)
+    return para
+
+
+def _body(doc: Document, text: str, space_before=4):
+    para = doc.add_paragraph()
+    para.paragraph_format.space_before = Pt(space_before)
+    para.paragraph_format.space_after  = Pt(4)
+    _run(para, text, size_pt=10, color=DARK_TEXT)
+    return para
+
+
+def _spacer(doc: Document):
+    para = doc.add_paragraph()
+    para.paragraph_format.space_before = Pt(2)
+    para.paragraph_format.space_after  = Pt(2)
+
+
+# ── Table helpers ──────────────────────────────────────────────────────────────
+
+def _add_table(doc: Document, headers: list, rows: list,
+               col_widths_in: list = None, highlight_row: int = None):
+    """
+    Add a styled table.
+    headers       : list of column header strings
+    rows          : list of lists (each inner list = one row of strings)
+    col_widths_in : list of column widths in inches (must sum reasonably)
+    highlight_row : 0-based index of a row to highlight green
+    """
+    n_cols = len(headers)
+    if col_widths_in is None:
+        col_widths_in = [6.5 / n_cols] * n_cols
+
+    table = doc.add_table(rows=1 + len(rows), cols=n_cols)
+    table.style = 'Table Grid'
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+
+    # Header row
+    hdr_row = table.rows[0]
+    _set_row_height(hdr_row, 400)
+    for i, (hdr, w) in enumerate(zip(headers, col_widths_in)):
+        cell = hdr_row.cells[i]
+        cell.width = Inches(w)
+        _set_cell_bg(cell, BG_PRIMARY)
+        _set_cell_margins(cell)
+        p = cell.paragraphs[0]
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _run(p, hdr, bold=True, size_pt=10, color=WHITE)
+
+    # Data rows
+    for r_idx, row_data in enumerate(rows):
+        row = table.rows[r_idx + 1]
+        _set_row_height(row, 360)
+        is_highlight = (r_idx == highlight_row)
+        bg = BG_LIGHT_GREEN if is_highlight else (BG_GREY if r_idx % 2 else BG_WHITE)
+        for c_idx, (val, w) in enumerate(zip(row_data, col_widths_in)):
+            cell = row.cells[c_idx]
+            cell.width = Inches(w)
+            _set_cell_bg(cell, bg)
+            _set_cell_margins(cell)
+            p = cell.paragraphs[0]
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _run(p, val, bold=is_highlight, size_pt=10,
+                 color=GREEN if is_highlight else DARK_TEXT)
+
+    return table
+
+
+def _kpi_table(doc: Document, kpis: list):
+    """
+    kpis: list of (label, value, bg_hex) tuples, max 4 per row.
+    """
+    n = len(kpis)
+    col_w = 6.5 / n
+    table = doc.add_table(rows=1, cols=n)
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    row = table.rows[0]
+    _set_row_height(row, 600)
+    for i, (label, value, bg) in enumerate(kpis):
+        cell = row.cells[i]
+        cell.width = Inches(col_w)
+        _set_cell_bg(cell, bg)
+        _set_cell_margins(cell, top=120, bottom=120, left=120, right=120)
+        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        p1 = cell.paragraphs[0]
+        p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _run(p1, value, bold=True, size_pt=16, color=PRIMARY)
+        p2 = cell.add_paragraph()
+        p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _run(p2, label, size_pt=9, color=MID_GREY)
+    return table
+
+
+def _banner(doc: Document, title: str, subtitle: str, bg: str, title_color: RGBColor):
+    table = doc.add_table(rows=1, cols=1)
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    cell = table.rows[0].cells[0]
+    cell.width = Inches(6.5)
+    _set_cell_bg(cell, bg)
+    _set_cell_margins(cell, top=160, bottom=160, left=200, right=200)
+    p1 = cell.paragraphs[0]
+    p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _run(p1, title, bold=True, size_pt=13, color=title_color)
+    p2 = cell.add_paragraph()
+    p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _run(p2, subtitle, size_pt=10, color=DARK_TEXT)
+    return table
+
+
+# ── Main public function ───────────────────────────────────────────────────────
 
 def generate_forecast_report(
     historical_data: dict,
@@ -24,488 +231,269 @@ def generate_forecast_report(
     has_product: bool = False
 ) -> str:
     """
-    Generate a Word (.docx) forecast report.
-    Returns the path to the generated file.
+    Generate a Word (.docx) forecast report using python-docx.
+    Returns the path to the generated .docx file.
     """
-    output_dir = tempfile.mkdtemp()
-    output_path = os.path.join(output_dir, f"forecast_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx")
 
-    # ── Compute summary numbers ────────────────────────────────────────────────
-    total_forecast_sales = sum(forecast_data.get('forecast_sales', []))
-    total_forecast_revenue = sum(forecast_data.get('forecast_revenue', []))
-    avg_forecast_sales = total_forecast_sales / max(len(forecast_data.get('forecast_sales', [1])), 1)
-    avg_forecast_revenue = total_forecast_revenue / max(len(forecast_data.get('forecast_revenue', [1])), 1)
-
-    hist_sales = historical_data.get('sales', [])
+    # ── Pre-compute summary values ─────────────────────────────────────────────
+    fc_sales   = forecast_data.get('forecast_sales', [])
+    fc_revenue = forecast_data.get('forecast_revenue', [])
+    hist_sales   = historical_data.get('sales', [])
     hist_revenue = historical_data.get('revenue', [])
-    sales_growth = ((avg_forecast_sales - stats['avg_sales']) / stats['avg_sales'] * 100) if stats['avg_sales'] else 0
-    revenue_growth = ((avg_forecast_revenue - (sum(hist_revenue) / max(len(hist_revenue), 1))) /
-                      (sum(hist_revenue) / max(len(hist_revenue), 1)) * 100) if hist_revenue else 0
 
-    # ── Prepare model comparison rows ─────────────────────────────────────────
-    model_rows_js = []
-    for model_name, result in model_results.items():
-        mape = f"{result['mape']:.2f}%" if result.get('mape') else 'N/A'
-        rmse = f"{result['rmse']:.2f}" if result.get('rmse') else 'N/A'
-        is_best = model_name == best_model
-        model_rows_js.append({'model': model_name, 'mape': mape, 'rmse': rmse, 'is_best': is_best})
+    avg_fc_sales   = sum(fc_sales)   / max(len(fc_sales), 1)
+    avg_fc_revenue = sum(fc_revenue) / max(len(fc_revenue), 1)
+    avg_hist_sales   = stats.get('avg_sales', sum(hist_sales) / max(len(hist_sales), 1))
+    avg_hist_revenue = sum(hist_revenue) / max(len(hist_revenue), 1) if hist_revenue else 0
 
-    # ── Prepare forecast table rows ────────────────────────────────────────────
-    forecast_rows_js = []
-    for i, (d, s, r) in enumerate(zip(
-        forecast_data.get('dates', []),
-        forecast_data.get('forecast_sales', []),
-        forecast_data.get('forecast_revenue', [])
-    )):
-        forecast_rows_js.append({'date': d, 'sales': f"${s:,.2f}", 'revenue': f"${r:,.2f}"})
+    sales_growth   = ((avg_fc_sales   - avg_hist_sales)   / avg_hist_sales   * 100) if avg_hist_sales   else 0
+    revenue_growth = ((avg_fc_revenue - avg_hist_revenue) / avg_hist_revenue * 100) if avg_hist_revenue else 0
+    accuracy_text  = f"{best_accuracy:.2f}%" if best_accuracy else "N/A"
 
-    # ── Product profitability rows ─────────────────────────────────────────────
-    product_profit_rows_js = []
-    top_product = None
-    if product_profit_summary:
-        top_product = product_profit_summary[0]
-        for p in product_profit_summary:
-            product_profit_rows_js.append({
-                'product': p['product'],
-                'total_sales': f"${p['Total_Sales']:,.2f}",
-                'total_revenue': f"${p['Total_Revenue']:,.2f}",
-                'profit': f"${p['Profit']:,.2f}",
-                'margin': f"{p['Profit_Margin_%']:.2f}%",
-                'is_top': p['product'] == top_product['product']
-            })
+    report_title  = "Sales & Revenue Forecast Report"
+    if selected_product:
+        report_title += f" — {selected_product}"
+    generated_on  = datetime.now().strftime("%B %d, %Y at %H:%M")
 
-    # ── Product trend rows ────────────────────────────────────────────────────
-    product_trend_rows_js = []
-    if product_trend_summary:
-        for t in product_trend_summary:
-            product_trend_rows_js.append({
-                'product': t['product'],
-                'avg_sales': f"${t['avg_sales']:,.2f}",
-                'avg_revenue': f"${t['avg_revenue']:,.2f}",
-                'growth_pct': f"{t['growth_pct']:+.2f}%",
-                'trend': t['trend']
-            })
+    # ── Create document ────────────────────────────────────────────────────────
+    doc = Document()
 
-    # ── Build the JavaScript for docx generation ──────────────────────────────
-    report_title = f"Sales & Revenue Forecast Report" + (f" — {selected_product}" if selected_product else "")
-    generated_on = datetime.now().strftime("%B %d, %Y at %H:%M")
-    accuracy_text = f"{best_accuracy:.2f}%" if best_accuracy else "N/A"
+    # Page margins (1 inch all round)
+    for section in doc.sections:
+        section.top_margin    = Inches(1)
+        section.bottom_margin = Inches(1)
+        section.left_margin   = Inches(1)
+        section.right_margin  = Inches(1)
 
-    js_code = f"""
-const {{ Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
-         HeadingLevel, AlignmentType, BorderStyle, WidthType, ShadingType,
-         VerticalAlign, LevelFormat, PageNumber, PageBreak }} = require('docx');
-const fs = require('fs');
+    # ── Cover ──────────────────────────────────────────────────────────────────
+    title_para = doc.add_paragraph()
+    title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    title_para.paragraph_format.space_before = Pt(24)
+    title_para.paragraph_format.space_after  = Pt(6)
+    _run(title_para, report_title, bold=True, size_pt=22, color=PRIMARY)
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-const COLORS = {{
-  primary: '1E3A5F',
-  accent: '2E86C1',
-  light_blue: 'D6EAF8',
-  green: '1E8449',
-  light_green: 'D5F5E3',
-  red: 'C0392B',
-  light_red: 'FADBD8',
-  orange: 'D35400',
-  light_orange: 'FDEBD0',
-  yellow_bg: 'FEF9E7',
-  grey_bg: 'F2F3F4',
-  white: 'FFFFFF',
-  dark_text: '1C2833',
-  mid_grey: '7F8C8D',
-  border: 'BDC3C7',
-}};
+    sub_para = doc.add_paragraph()
+    sub_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _run(sub_para, "AI-Powered Sales Intelligence Report", size_pt=12, color=MID_GREY)
 
-const border = {{ style: BorderStyle.SINGLE, size: 1, color: COLORS.border }};
-const borders = {{ top: border, bottom: border, left: border, right: border }};
-const noBorder = {{ style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }};
-const noBorders = {{ top: noBorder, bottom: noBorder, left: noBorder, right: noBorder }};
+    date_para = doc.add_paragraph()
+    date_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _run(date_para, f"Generated on {generated_on}", size_pt=10, italic=True, color=MID_GREY)
 
-function hCell(text, widthDxa, bgColor = COLORS.primary) {{
-  return new TableCell({{
-    borders,
-    width: {{ size: widthDxa, type: WidthType.DXA }},
-    shading: {{ fill: bgColor, type: ShadingType.CLEAR }},
-    margins: {{ top: 80, bottom: 80, left: 120, right: 120 }},
-    verticalAlign: VerticalAlign.CENTER,
-    children: [new Paragraph({{
-      alignment: AlignmentType.CENTER,
-      children: [new TextRun({{ text, bold: true, color: COLORS.white, size: 20, font: 'Arial' }})]
-    }})]
-  }});
-}}
+    divider = doc.add_paragraph()
+    divider.paragraph_format.space_before = Pt(6)
+    divider.paragraph_format.space_after  = Pt(16)
+    _para_border_bottom(divider, color="2E86C1", size=12)
 
-function dCell(text, widthDxa, bgColor = COLORS.white, bold = false, color = COLORS.dark_text) {{
-  return new TableCell({{
-    borders,
-    width: {{ size: widthDxa, type: WidthType.DXA }},
-    shading: {{ fill: bgColor, type: ShadingType.CLEAR }},
-    margins: {{ top: 80, bottom: 80, left: 120, right: 120 }},
-    verticalAlign: VerticalAlign.CENTER,
-    children: [new Paragraph({{
-      alignment: AlignmentType.CENTER,
-      children: [new TextRun({{ text: String(text), bold, color, size: 18, font: 'Arial' }})]
-    }})]
-  }});
-}}
+    # ── 1. Executive Summary ───────────────────────────────────────────────────
+    _heading(doc, "1. Executive Summary")
+    scope = f'for product "{selected_product}"' if selected_product else "across all products"
+    _body(doc,
+        f"This report presents a {periods}-period sales and revenue forecast {scope}, "
+        f"generated using the best-performing model: {best_model} (Accuracy MAPE: {accuracy_text}). "
+        f"Forecasted average sales stand at ${avg_fc_sales:,.2f} and average revenue at "
+        f"${avg_fc_revenue:,.2f} per period, reflecting a {sales_growth:+.1f}% growth trend "
+        f"vs historical averages."
+    )
+    _spacer(doc)
 
-function sectionHeading(text) {{
-  return new Paragraph({{
-    heading: HeadingLevel.HEADING_1,
-    spacing: {{ before: 360, after: 160 }},
-    children: [new TextRun({{ text, bold: true, color: COLORS.primary, size: 28, font: 'Arial' }})]
-  }});
-}}
+    _kpi_table(doc, [
+        ("Forecast Avg Sales",    f"${avg_fc_sales:,.0f}",    BG_LIGHT_BLUE),
+        ("Forecast Avg Revenue",  f"${avg_fc_revenue:,.0f}",  BG_LIGHT_GREEN),
+        ("Sales Growth",          f"{sales_growth:+.1f}%",
+         BG_LIGHT_GREEN if sales_growth >= 0 else BG_LIGHT_RED),
+        ("Forecast Horizon",      f"{periods} Periods",       BG_LIGHT_ORANGE),
+    ])
+    _spacer(doc)
 
-function subHeading(text) {{
-  return new Paragraph({{
-    heading: HeadingLevel.HEADING_2,
-    spacing: {{ before: 240, after: 120 }},
-    children: [new TextRun({{ text, bold: true, color: COLORS.accent, size: 24, font: 'Arial' }})]
-  }});
-}}
-
-function bodyPara(text, spacing_before = 80) {{
-  return new Paragraph({{
-    spacing: {{ before: spacing_before, after: 80 }},
-    children: [new TextRun({{ text, size: 20, font: 'Arial', color: COLORS.dark_text }})]
-  }});
-}}
-
-function kpiBox(label, value, bgColor) {{
-  return new Table({{
-    width: {{ size: 2200, type: WidthType.DXA }},
-    columnWidths: [2200],
-    rows: [
-      new TableRow({{ children: [
-        new TableCell({{
-          borders: noBorders,
-          width: {{ size: 2200, type: WidthType.DXA }},
-          shading: {{ fill: bgColor, type: ShadingType.CLEAR }},
-          margins: {{ top: 120, bottom: 120, left: 160, right: 160 }},
-          children: [
-            new Paragraph({{ alignment: AlignmentType.CENTER, children: [
-              new TextRun({{ text: value, bold: true, size: 28, color: COLORS.primary, font: 'Arial' }})
-            ]}}),
-            new Paragraph({{ alignment: AlignmentType.CENTER, children: [
-              new TextRun({{ text: label, size: 16, color: COLORS.mid_grey, font: 'Arial' }})
-            ]}})
-          ]
-        }})
-      ]}})
-    ]
-  }});
-}}
-
-// ── Data ─────────────────────────────────────────────────────────────────────
-const modelRows = {json.dumps(model_rows_js)};
-const forecastRows = {json.dumps(forecast_rows_js)};
-const productProfitRows = {json.dumps(product_profit_rows_js)};
-const productTrendRows = {json.dumps(product_trend_rows_js)};
-const hasProduct = {str(has_product).lower()};
-const selectedProduct = {json.dumps(selected_product)};
-const topProduct = {json.dumps(top_product)};
-
-// ── Document Children ─────────────────────────────────────────────────────────
-const children = [];
-
-// Cover block
-children.push(new Paragraph({{
-  spacing: {{ before: 480, after: 80 }},
-  alignment: AlignmentType.CENTER,
-  children: [new TextRun({{ text: '{report_title}', bold: true, size: 40, color: COLORS.primary, font: 'Arial' }})]
-}}));
-children.push(new Paragraph({{
-  spacing: {{ before: 80, after: 80 }},
-  alignment: AlignmentType.CENTER,
-  children: [new TextRun({{ text: 'AI-Powered Sales Intelligence Report', size: 22, color: COLORS.mid_grey, font: 'Arial' }})]
-}}));
-children.push(new Paragraph({{
-  spacing: {{ before: 80, after: 80 }},
-  alignment: AlignmentType.CENTER,
-  children: [new TextRun({{ text: 'Generated on {generated_on}', size: 18, color: COLORS.mid_grey, font: 'Arial', italics: true }})]
-}}));
-children.push(new Paragraph({{ spacing: {{ before: 80, after: 80 }}, children: [new TextRun('')] }}));
-// Divider
-children.push(new Paragraph({{
-  spacing: {{ before: 0, after: 320 }},
-  border: {{ bottom: {{ style: BorderStyle.SINGLE, size: 6, color: COLORS.accent, space: 1 }} }},
-  children: []
-}}));
-
-// ── 1. Executive Summary ──────────────────────────────────────────────────────
-children.push(sectionHeading('1. Executive Summary'));
-const summaryText = selectedProduct
-  ? `This report presents a ${{periods}}-period sales and revenue forecast for the product "${{selectedProduct}}", ` +
-    `generated using the ${{'{best_model}'}} model (MAPE: {accuracy_text}). ` +
-    `Forecasted average sales are $${{ {avg_forecast_sales:.2f} .toFixed(2)}} and average revenue is $${{ {avg_forecast_revenue:.2f} .toFixed(2)}} per period.`
-  : `This report presents a ${{periods}}-period sales and revenue forecast across all products, ` +
-    `generated using the best-performing ${{'{best_model}'}} model (MAPE: {accuracy_text}). ` +
-    `Forecasted average sales are ${avg_forecast_sales:.2f} and average revenue is ${avg_forecast_revenue:.2f} per period.`;
-
-children.push(bodyPara(
-  `This report presents a {periods}-period sales and revenue forecast` +
-  (selectedProduct ? ` for product "${{selectedProduct}}"` : ' across all products') +
-  `, generated using the best-performing model: {best_model} (Accuracy MAPE: {accuracy_text}). ` +
-  `Forecasted average sales stand at ${avg_forecast_sales:,.2f} and average revenue at ${avg_forecast_revenue:,.2f} per period, ` +
-  `reflecting a ${{'{sales_growth:.1f}%'}} growth trend vs historical averages.`
-));
-
-// KPI row (use a table for side-by-side layout)
-children.push(new Paragraph({{ spacing: {{ before: 160, after: 80 }}, children: [] }}));
-children.push(new Table({{
-  width: {{ size: 9360, type: WidthType.DXA }},
-  columnWidths: [2340, 2340, 2340, 2340],
-  rows: [new TableRow({{ children: [
-    dCell('${avg_forecast_sales:,.0f}\\nForecast Avg Sales', 2340, COLORS.light_blue, true, COLORS.primary),
-    dCell('${avg_forecast_revenue:,.0f}\\nForecast Avg Revenue', 2340, COLORS.light_green, true, COLORS.green),
-    dCell('{sales_growth:+.1f}%\\nSales Growth', 2340, {'COLORS.light_green' if sales_growth >= 0 else 'COLORS.light_red'}, true, {'COLORS.green' if sales_growth >= 0 else 'COLORS.red'}),
-    dCell('{periods} Periods\\nForecast Horizon', 2340, COLORS.light_orange, true, COLORS.orange),
-  ]}})]
-}}));
-children.push(new Paragraph({{ spacing: {{ before: 80, after: 80 }}, children: [] }}));
-
-// ── 2. Historical Data Summary ────────────────────────────────────────────────
-children.push(sectionHeading('2. Historical Data Summary'));
-children.push(bodyPara(`Historical dataset contains {len(hist_sales)} records. Average sales: ${stats['avg_sales']:,.2f} | Average revenue: ${sum(hist_revenue)/max(len(hist_revenue),1):,.2f} | Min sales: ${stats['min_sales']:,.2f} | Max sales: ${stats['max_sales']:,.2f}.`));
-
-// ── 3. Model Performance ──────────────────────────────────────────────────────
-children.push(sectionHeading('3. Model Performance Comparison'));
-children.push(bodyPara('The following table shows all evaluated forecasting models ranked by accuracy (MAPE — Mean Absolute Percentage Error). Lower MAPE = better accuracy. The winning model is highlighted.'));
-children.push(new Paragraph({{ spacing: {{ before: 120, after: 80 }}, children: [] }}));
-
-const modelTableRows = [
-  new TableRow({{ children: [hCell('Model', 4680), hCell('MAPE (Accuracy)', 2340), hCell('RMSE', 2340)] }})
-];
-modelRows.forEach(r => {{
-  const bg = r.is_best ? COLORS.light_green : COLORS.white;
-  const bold = r.is_best;
-  modelTableRows.push(new TableRow({{ children: [
-    dCell(r.model + (r.is_best ? ' ★ Best' : ''), 4680, bg, bold),
-    dCell(r.mape, 2340, bg, bold),
-    dCell(r.rmse, 2340, bg, bold),
-  ]}}));
-}});
-children.push(new Table({{ width: {{ size: 9360, type: WidthType.DXA }}, columnWidths: [4680, 2340, 2340], rows: modelTableRows }}));
-
-// ── 4. Forecast Results ───────────────────────────────────────────────────────
-children.push(new Paragraph({{ spacing: {{ before: 80, after: 80 }}, children: [] }}));
-children.push(sectionHeading('4. Forecast Results'));
-children.push(bodyPara(`Forecast generated for {periods} periods using the {best_model} model. Sales and revenue projections are shown below.`));
-children.push(new Paragraph({{ spacing: {{ before: 120, after: 80 }}, children: [] }}));
-
-const forecastTableRows = [
-  new TableRow({{ children: [hCell('Period / Date', 3120), hCell('Forecast Sales ($)', 3120), hCell('Forecast Revenue ($)', 3120)] }})
-];
-forecastRows.forEach((r, i) => {{
-  const bg = i % 2 === 0 ? COLORS.white : COLORS.grey_bg;
-  forecastTableRows.push(new TableRow({{ children: [
-    dCell(r.date, 3120, bg),
-    dCell(r.sales, 3120, bg),
-    dCell(r.revenue, 3120, bg),
-  ]}}));
-}});
-children.push(new Table({{ width: {{ size: 9360, type: WidthType.DXA }}, columnWidths: [3120, 3120, 3120], rows: forecastTableRows }}));
-
-// ── 5. Product Profitability Analysis (conditional) ───────────────────────────
-if (hasProduct && productProfitRows.length > 0 && !selectedProduct) {{
-  children.push(new Paragraph({{ spacing: {{ before: 80, after: 80 }}, children: [] }}));
-  children.push(sectionHeading('5. Product Profitability Analysis'));
-
-  const topName = topProduct ? topProduct.product : '';
-  const topProfit = topProduct ? '$' + topProduct.Profit.toFixed(2) : '';
-  const topMargin = topProduct ? topProduct['Profit_Margin_%'].toFixed(2) + '%' : '';
-
-  children.push(bodyPara(
-    topProduct
-      ? `Across all products, "${{topName}}" leads in profitability with a total profit of ${{topProfit}} and a margin of ${{topMargin}}. ` +
-        `Products are ranked below from most to least profitable. Use this analysis to prioritise marketing, inventory, and pricing strategies.`
-      : 'Product profitability breakdown across all products is shown below.'
-  ));
-
-  // Highlight box for top product
-  if (topProduct) {{
-    children.push(new Paragraph({{ spacing: {{ before: 120, after: 80 }}, children: [] }}));
-    children.push(new Table({{
-      width: {{ size: 9360, type: WidthType.DXA }},
-      columnWidths: [9360],
-      rows: [new TableRow({{ children: [new TableCell({{
-        borders: noBorders,
-        width: {{ size: 9360, type: WidthType.DXA }},
-        shading: {{ fill: COLORS.light_green, type: ShadingType.CLEAR }},
-        margins: {{ top: 120, bottom: 120, left: 200, right: 200 }},
-        children: [
-          new Paragraph({{ alignment: AlignmentType.CENTER, children: [
-            new TextRun({{ text: '🏆 Top Performing Product', bold: true, size: 22, color: COLORS.green, font: 'Arial' }})
-          ]}}),
-          new Paragraph({{ alignment: AlignmentType.CENTER, children: [
-            new TextRun({{ text: `${{topName}}  |  Profit: ${{topProfit}}  |  Margin: ${{topMargin}}`, size: 20, color: COLORS.dark_text, font: 'Arial' }})
-          ]}})
-        ]
-      }})]}})]
-    }}));
-  }}
-
-  children.push(new Paragraph({{ spacing: {{ before: 160, after: 80 }}, children: [] }}));
-  const profitTableRows = [
-    new TableRow({{ children: [
-      hCell('Product', 2600), hCell('Total Sales', 1690), hCell('Total Revenue', 1690),
-      hCell('Profit', 1690), hCell('Margin %', 1690)
-    ]}})
-  ];
-  productProfitRows.forEach((r, i) => {{
-    const bg = r.is_top ? COLORS.light_green : (i % 2 === 0 ? COLORS.white : COLORS.grey_bg);
-    const bold = r.is_top;
-    profitTableRows.push(new TableRow({{ children: [
-      dCell(r.product + (r.is_top ? ' ★' : ''), 2600, bg, bold),
-      dCell(r.total_sales, 1690, bg, bold),
-      dCell(r.total_revenue, 1690, bg, bold),
-      dCell(r.profit, 1690, bg, bold),
-      dCell(r.margin, 1690, bg, bold),
-    ]}}));
-  }});
-  children.push(new Table({{
-    width: {{ size: 9360, type: WidthType.DXA }},
-    columnWidths: [2600, 1690, 1690, 1690, 1690],
-    rows: profitTableRows
-  }}));
-}}
-
-// ── 6. Product Sales Trend Review (conditional) ───────────────────────────────
-if (hasProduct && productTrendRows.length > 0 && !selectedProduct) {{
-  children.push(new Paragraph({{ spacing: {{ before: 80, after: 80 }}, children: [] }}));
-  children.push(sectionHeading('6. Product Sales Trend Review'));
-  children.push(bodyPara(
-    'This section reviews the historical sales trend for each product by comparing the first half vs the second half of the available data period. ' +
-    'Growth rate is calculated as the percentage change in average sales between the two halves, providing an early signal of momentum.'
-  ));
-  children.push(new Paragraph({{ spacing: {{ before: 120, after: 80 }}, children: [] }}));
-
-  const trendTableRows = [
-    new TableRow({{ children: [
-      hCell('Product', 2600), hCell('Avg Sales', 1690), hCell('Avg Revenue', 1690),
-      hCell('Growth Rate', 1690), hCell('Trend Signal', 1690)
-    ]}})
-  ];
-  productTrendRows.forEach((r, i) => {{
-    const growth = parseFloat(r.growth_pct);
-    const bg = growth > 5 ? COLORS.light_green : (growth < -5 ? COLORS.light_red : (i % 2 === 0 ? COLORS.white : COLORS.grey_bg));
-    const bold = Math.abs(growth) > 5;
-    trendTableRows.push(new TableRow({{ children: [
-      dCell(r.product, 2600, bg, bold),
-      dCell(r.avg_sales, 1690, bg),
-      dCell(r.avg_revenue, 1690, bg),
-      dCell(r.growth_pct, 1690, bg, bold),
-      dCell(r.trend, 1690, bg, bold),
-    ]}}));
-  }});
-  children.push(new Table({{
-    width: {{ size: 9360, type: WidthType.DXA }},
-    columnWidths: [2600, 1690, 1690, 1690, 1690],
-    rows: trendTableRows
-  }}));
-
-  // Legend note
-  children.push(new Paragraph({{ spacing: {{ before: 120, after: 80 }},
-    children: [new TextRun({{
-      text: 'Legend: 📈 Growing = >+5% growth  |  📉 Declining = >-5% decline  |  ➡️ Stable = within ±5%',
-      size: 16, italics: true, color: COLORS.mid_grey, font: 'Arial'
-    }})]
-  }}));
-}}
-
-// ── 7. Recommendations ───────────────────────────────────────────────────────
-const recSection = hasProduct && productProfitRows.length > 0 ? '7' : '5';
-children.push(new Paragraph({{ spacing: {{ before: 80, after: 80 }}, children: [] }}));
-children.push(sectionHeading(`${{recSection}}. Recommendations`));
-
-const recItems = [
-  `Model Selection: Continue using {best_model} for future forecasts given its superior accuracy (MAPE: {accuracy_text}).`,
-  `Forecast Horizon: The current {periods}-period forecast is suitable for near-term planning. For longer-term strategy, consider extending to 12-24 periods.`,
-];
-if (hasProduct && topProduct) {{
-  recItems.push(`Product Focus: Prioritise "${{topProduct.product}}" in marketing and inventory planning — it delivers the highest profitability.`);
-  recItems.push('Declining Products: Investigate products flagged as Declining in the Trend Review and consider promotional actions or discontinuation.');
-}}
-recItems.push('Data Quality: Ensure historical data is consistently updated to maintain forecast accuracy over time.');
-recItems.push('Review Cycle: Re-run this forecast monthly or after any major business event to keep projections current.');
-
-recItems.forEach(item => {{
-  children.push(new Paragraph({{
-    spacing: {{ before: 80, after: 60 }},
-    numbering: {{ reference: 'bullets', level: 0 }},
-    children: [new TextRun({{ text: item, size: 20, font: 'Arial', color: COLORS.dark_text }})]
-  }}));
-}});
-
-// ── Footer note ───────────────────────────────────────────────────────────────
-children.push(new Paragraph({{ spacing: {{ before: 360, after: 80 }},
-  border: {{ top: {{ style: BorderStyle.SINGLE, size: 1, color: COLORS.border, space: 1 }} }},
-  children: [new TextRun({{
-    text: 'This report was automatically generated by the Smart Sales Forecasting Dashboard. ' +
-          'Forecasts are statistical estimates and should be used as a guide alongside business judgment.',
-    size: 16, italics: true, color: COLORS.mid_grey, font: 'Arial'
-  }})]
-}}));
-
-// ── Assemble Document ─────────────────────────────────────────────────────────
-const doc = new Document({{
-  numbering: {{
-    config: [{{
-      reference: 'bullets',
-      levels: [{{ level: 0, format: LevelFormat.BULLET, text: '\\u2022',
-        alignment: AlignmentType.LEFT,
-        style: {{ paragraph: {{ indent: {{ left: 720, hanging: 360 }} }} }}
-      }}]
-    }}]
-  }},
-  styles: {{
-    default: {{ document: {{ run: {{ font: 'Arial', size: 20 }} }} }},
-    paragraphStyles: [
-      {{ id: 'Heading1', name: 'Heading 1', basedOn: 'Normal', next: 'Normal', quickFormat: true,
-        run: {{ size: 28, bold: true, font: 'Arial' }},
-        paragraph: {{ spacing: {{ before: 360, after: 160 }}, outlineLevel: 0 }} }},
-      {{ id: 'Heading2', name: 'Heading 2', basedOn: 'Normal', next: 'Normal', quickFormat: true,
-        run: {{ size: 24, bold: true, font: 'Arial' }},
-        paragraph: {{ spacing: {{ before: 240, after: 120 }}, outlineLevel: 1 }} }},
-    ]
-  }},
-  sections: [{{
-    properties: {{
-      page: {{
-        size: {{ width: 12240, height: 15840 }},
-        margin: {{ top: 1440, right: 1440, bottom: 1440, left: 1440 }}
-      }}
-    }},
-    children
-  }}]
-}});
-
-Packer.toBuffer(doc).then(buf => {{
-  fs.writeFileSync('{output_path.replace(os.sep, "/")}', buf);
-  console.log('SUCCESS');
-}}).catch(err => {{
-  console.error('ERROR:', err.message);
-  process.exit(1);
-}});
-"""
-
-    # Write JS to temp file and run
-    js_path = os.path.join(output_dir, 'gen_report.js')
-    with open(js_path, 'w', encoding='utf-8') as f:
-        f.write(js_code)
-
-    # Ensure docx is installed
-    subprocess.run(['npm', 'install', '-g', 'docx'], capture_output=True)
-
-    result = subprocess.run(
-        ['node', js_path],
-        capture_output=True, text=True, timeout=60
+    # ── 2. Historical Data Summary ─────────────────────────────────────────────
+    _heading(doc, "2. Historical Data Summary")
+    _body(doc,
+        f"Historical dataset contains {len(hist_sales)} records. "
+        f"Average sales: ${avg_hist_sales:,.2f} | "
+        f"Average revenue: ${avg_hist_revenue:,.2f} | "
+        f"Min sales: ${stats.get('min_sales', 0):,.2f} | "
+        f"Max sales: ${stats.get('max_sales', 0):,.2f}."
     )
 
-    if result.returncode != 0 or not os.path.exists(output_path):
-        raise RuntimeError(
-            f"Report generation failed.\nSTDOUT: {result.stdout}\nSTDERR: {result.stderr}"
+    # ── 3. Model Performance ───────────────────────────────────────────────────
+    _heading(doc, "3. Model Performance Comparison")
+    _body(doc,
+        "All evaluated forecasting models are shown below ranked by accuracy (MAPE). "
+        "Lower MAPE = better accuracy. The winning model is highlighted in green."
+    )
+    _spacer(doc)
+
+    model_rows = []
+    best_row_idx = None
+    for i, (model_name, result) in enumerate(model_results.items()):
+        mape = f"{result['mape']:.2f}%" if result.get('mape') else "N/A"
+        rmse = f"{result['rmse']:.2f}"  if result.get('rmse') else "N/A"
+        label = model_name + (" ★ Best" if model_name == best_model else "")
+        model_rows.append([label, mape, rmse])
+        if model_name == best_model:
+            best_row_idx = i
+
+    _add_table(doc,
+        headers=["Model", "MAPE (Accuracy)", "RMSE"],
+        rows=model_rows,
+        col_widths_in=[3.2, 1.65, 1.65],
+        highlight_row=best_row_idx
+    )
+    _spacer(doc)
+
+    # ── 4. Forecast Results ────────────────────────────────────────────────────
+    _heading(doc, "4. Forecast Results")
+    _body(doc,
+        f"Forecast generated for {periods} periods using the {best_model} model. "
+        "Sales and revenue projections are shown below."
+    )
+    _spacer(doc)
+
+    forecast_rows = [
+        [d, f"${s:,.2f}", f"${r:,.2f}"]
+        for d, s, r in zip(
+            forecast_data.get('dates', []),
+            fc_sales,
+            fc_revenue
+        )
+    ]
+    _add_table(doc,
+        headers=["Period / Date", "Forecast Sales ($)", "Forecast Revenue ($)"],
+        rows=forecast_rows,
+        col_widths_in=[2.17, 2.17, 2.16]
+    )
+    _spacer(doc)
+
+    # ── 5. Product Profitability (conditional) ─────────────────────────────────
+    section_num = 5
+    if has_product and product_profit_summary and not selected_product:
+        _heading(doc, f"{section_num}. Product Profitability Analysis")
+        section_num += 1
+
+        top = product_profit_summary[0]
+        top_name   = top.get('product', '')
+        top_profit = top.get('Profit', 0)
+        top_margin = top.get('Profit_Margin_%', 0)
+
+        _body(doc,
+            f'Across all products, "{top_name}" leads in profitability with a total profit of '
+            f"${top_profit:,.2f} and a margin of {top_margin:.2f}%. "
+            "Products are ranked below from most to least profitable."
+        )
+        _spacer(doc)
+
+        # Top product banner
+        _banner(doc,
+            title=f"🏆 Top Performing Product: {top_name}",
+            subtitle=f"Profit: ${top_profit:,.2f}   |   Margin: {top_margin:.2f}%",
+            bg=BG_LIGHT_GREEN,
+            title_color=GREEN
+        )
+        _spacer(doc)
+
+        profit_rows = []
+        best_profit_idx = 0
+        for i, p in enumerate(product_profit_summary):
+            profit_rows.append([
+                p.get('product', ''),
+                f"${p.get('Total_Sales', 0):,.2f}",
+                f"${p.get('Total_Revenue', 0):,.2f}",
+                f"${p.get('Profit', 0):,.2f}",
+                f"{p.get('Profit_Margin_%', 0):.2f}%",
+            ])
+
+        _add_table(doc,
+            headers=["Product", "Total Sales", "Total Revenue", "Profit", "Margin %"],
+            rows=profit_rows,
+            col_widths_in=[1.8, 1.2, 1.3, 1.1, 1.1],
+            highlight_row=best_profit_idx
+        )
+        _spacer(doc)
+
+    # ── 6. Product Sales Trend Review (conditional) ───────────────────────────
+    if has_product and product_trend_summary and not selected_product:
+        _heading(doc, f"{section_num}. Product Sales Trend Review")
+        section_num += 1
+
+        _body(doc,
+            "This section reviews the historical sales trend for each product by comparing "
+            "the first half vs the second half of the available data period. Growth rate is "
+            "the percentage change in average sales between the two halves."
+        )
+        _spacer(doc)
+
+        trend_rows = []
+        for t in product_trend_summary:
+            trend_rows.append([
+                t.get('product', ''),
+                f"${t.get('avg_sales', 0):,.2f}",
+                f"${t.get('avg_revenue', 0):,.2f}",
+                f"{t.get('growth_pct', 0):+.2f}%",
+                t.get('trend', ''),
+            ])
+
+        _add_table(doc,
+            headers=["Product", "Avg Sales", "Avg Revenue", "Growth Rate", "Trend Signal"],
+            rows=trend_rows,
+            col_widths_in=[1.8, 1.2, 1.3, 1.1, 1.1]
         )
 
+        legend = doc.add_paragraph()
+        legend.paragraph_format.space_before = Pt(6)
+        _run(legend,
+            "Legend:  📈 Growing = >+5%   |   📉 Declining = >−5%   |   ➡️ Stable = within ±5%",
+            italic=True, size_pt=9, color=MID_GREY
+        )
+        _spacer(doc)
+
+    # ── 7. Recommendations ────────────────────────────────────────────────────
+    _heading(doc, f"{section_num}. Recommendations")
+
+    rec_items = [
+        f"Model Selection: Continue using {best_model} for future forecasts "
+        f"given its superior accuracy (MAPE: {accuracy_text}).",
+        f"Forecast Horizon: The current {periods}-period forecast is suitable for near-term "
+        "planning. For longer-term strategy, consider extending to 12–24 periods.",
+        "Data Quality: Ensure historical data is consistently updated to maintain forecast "
+        "accuracy over time.",
+        "Review Cycle: Re-run this forecast monthly or after any major business event to keep "
+        "projections current.",
+    ]
+    if has_product and product_profit_summary:
+        top_name = product_profit_summary[0].get('product', '')
+        rec_items.insert(2,
+            f'Product Focus: Prioritise "{top_name}" in marketing and inventory planning — '
+            "it delivers the highest profitability."
+        )
+        rec_items.insert(3,
+            "Declining Products: Investigate products flagged as Declining in the Trend "
+            "Review and consider promotional actions or discontinuation."
+        )
+
+    for item in rec_items:
+        para = doc.add_paragraph(style='List Bullet')
+        para.paragraph_format.space_before = Pt(3)
+        para.paragraph_format.space_after  = Pt(3)
+        _run(para, item, size_pt=10, color=DARK_TEXT)
+
+    # ── Footer note ────────────────────────────────────────────────────────────
+    _spacer(doc)
+    footer_para = doc.add_paragraph()
+    footer_para.paragraph_format.space_before = Pt(16)
+    _para_border_bottom(footer_para, color="BDC3C7", size=4)
+    _run(footer_para,
+        "This report was automatically generated by the Smart Sales Forecasting Dashboard. "
+        "Forecasts are statistical estimates and should be used as a guide alongside "
+        "business judgment.",
+        italic=True, size_pt=9, color=MID_GREY
+    )
+
+    # ── Save ───────────────────────────────────────────────────────────────────
+    output_dir  = tempfile.mkdtemp()
+    output_path = os.path.join(
+        output_dir,
+        f"forecast_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
+    )
+    doc.save(output_path)
     return output_path
