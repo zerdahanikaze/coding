@@ -104,7 +104,7 @@ def load_and_preprocess_data(
     df = df.rename(columns=rename_map)
 
     # Parse date
-    df['date'] = pd.to_datetime(df['date'], infer_datetime_format=True)
+    df['date'] = pd.to_datetime(df['date'])
 
     # Ensure numeric
     df['sales'] = pd.to_numeric(df['sales'], errors='coerce')
