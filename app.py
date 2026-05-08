@@ -10,7 +10,7 @@ import os
 import altair as alt
 
 st.set_page_config(page_title="Sales Forecasting Dashboard", layout="wide")
-st.title("🚀 Smart Sales and Revenue Forecasting Dashboard")
+st.title(" Smart Sales and Revenue Forecasting Dashboard")
 
 AVAILABLE_MODELS = list(MODEL_REGISTRY.keys())
 
@@ -18,7 +18,7 @@ if 'last_forecast_data' not in st.session_state:
     st.session_state.last_forecast_data = None
 
 # ── Sidebar: Upload ────────────────────────────────────────────────────────────
-st.sidebar.header("📊 Data Upload and Configuration")
+st.sidebar.header(" Data Upload and Configuration")
 uploaded_file = st.sidebar.file_uploader("Upload your historical sales data (CSV)", type="csv")
 
 data = None
@@ -32,10 +32,10 @@ if uploaded_file is not None:
         st.sidebar.success(f"✓ File loaded: {uploaded_file.name}")
         st.sidebar.write("**Detected columns:**")
         c1, c2, c3, c4 = st.sidebar.columns(4)
-        c1.caption(f"📅 {detected_cols['date']}")
-        c2.caption(f"📈 {detected_cols['sales']}")
-        c3.caption(f"💰 {detected_cols.get('revenue') or '—'}")
-        c4.caption(f"📦 {detected_cols.get('product') or '—'}")
+        c1.caption(f" {detected_cols['date']}")
+        c2.caption(f" {detected_cols['sales']}")
+        c3.caption(f" {detected_cols.get('revenue') or '—'}")
+        c4.caption(f" {detected_cols.get('product') or '—'}")
 
         with st.sidebar.expander("🔧 Override Column Names"):
             col_date    = st.text_input("Date column",    value=detected_cols['date'] or '')
@@ -63,7 +63,7 @@ if uploaded_file is not None:
         st.sidebar.error(f"❌ Error loading file: {e}")
         st.stop()
 else:
-    st.sidebar.info("💡 No file uploaded. Using sample data.")
+    st.sidebar.info(" No file uploaded. Using sample data.")
     try:
         data = load_and_preprocess_data("data/sample_sales_data.csv")
         detected_cols = {'date': 'date', 'sales': 'sales', 'revenue': 'revenue', 'product': None}
@@ -153,7 +153,7 @@ if data is not None:
 
     # ── Run Forecast ───────────────────────────────────────────────────────────
     run_disabled = (not use_auto) and (not models_to_use)
-    if st.sidebar.button("🚀 Generate Forecast", use_container_width=True,
+    if st.sidebar.button(" Generate Forecast", use_container_width=True,
                          disabled=run_disabled):
         try:
             with st.spinner("🔄 Running models…"):
