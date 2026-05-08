@@ -1,4 +1,4 @@
-# 🎯 Automatic Model Selection Guide
+# Automatic Model Selection Guide
 
 ## What is Automatic Model Selection?
 
@@ -40,11 +40,11 @@ Uses the selected model to generate final predictions.
 
 ### Step 4: Reporting
 Shows you:
-- ✅ Which model was selected
-- ✅ Why it was chosen (data characteristics identified)
-- ✅ Accuracy percentage
-- ✅ Comparison with other models
-- ✅ Data pattern analysis
+- Which model was selected
+- Why it was chosen (data characteristics identified)
+- Accuracy percentage
+- Comparison with other models
+- Data pattern analysis
 
 ---
 
@@ -53,9 +53,9 @@ Shows you:
 ### In the Dashboard:
 
 ```
-🤖 Forecasting Model
+ Forecasting Model
 ┌─────────────────────────────────┐
-│ ☑ 🎯 Auto-Select Best Model     │
+│ Auto-Select Best Model     │
 │                                 │
 │ "System will analyze your data  │
 │  and select the best performing │
@@ -76,23 +76,23 @@ For each product, you'll see:
 
 ```
 ┌─────────────────────────────────────┐
-│  🤖 Selected Model   | 📊 Accuracy  │  ✨ Data Pattern
+│  Selected Model   |  Accuracy  │   Data Pattern
 │  SARIMA              │  87.3%       │  Seasonal
 │
-│ 📖 Why this model was selected?
+│  Why this model was selected?
 │ ─────────────────────────────────
 │ Data has clear seasonality and trend. 
 │ Selected model handles both components.
 │
 │ ▼ Data Characteristics
 │ • Data Points: 48
-│ • Trend Strength: Strong ⬆️
-│ • Seasonality: Present 📈
-│ • Volatility: Low ✅
+│ • Trend Strength: Strong ⬆
+│ • Seasonality: Present 
+│ • Volatility: Low 
 │
 │ ▼ Model Accuracy Comparison
 │ Model                    Accuracy  Status
-│ SARIMA                   87.3%     ✅ Selected
+│ SARIMA                   87.3%      Selected
 │ Prophet                  84.2%
 │ Exponential Smoothing    82.1%
 │ ARIMA                    78.9%
@@ -105,7 +105,7 @@ For each product, you'll see:
 ### Forecast Chart
 The chart title shows the model used:
 ```
-📈 Product Name - Sales Forecast (SARIMA Model)
+ Product Name - Sales Forecast (SARIMA Model)
 ```
 
 ---
@@ -114,7 +114,7 @@ The chart title shows the model used:
 
 When auto-selection runs, it analyzes:
 
-### **Seasonality** 📈
+### **Seasonality** 
 - **Present**: Data has repeating patterns at regular intervals
   - Use: SARIMA, Prophet, Exponential Smoothing
   - Example: Retail sales spike during holidays every year
@@ -123,7 +123,7 @@ When auto-selection runs, it analyzes:
   - Use: ARIMA, Moving Average, Linear Regression
   - Example: Website traffic with random spikes
 
-### **Trend** ⬆️
+### **Trend** 
 - **Strong**: Clear upward or downward movement
   - Use: Exponential Smoothing, Prophet, Linear Regression
   - Example: Growing user base over time
@@ -132,7 +132,7 @@ When auto-selection runs, it analyzes:
   - Use: Simple Exponential Smoothing, Moving Average
   - Example: Stable revenue with minor fluctuations
 
-### **Volatility** 📊
+### **Volatility** 
 - **High**: Lots of noise and irregular jumps
   - Use: Moving Average, Prophet (robust to outliers)
   - Example: Stock prices with daily swings
@@ -141,7 +141,7 @@ When auto-selection runs, it analyzes:
   - Use: ARIMA, Linear Regression
   - Example: Stable subscription numbers
 
-### **Stationarity** ➡️
+### **Stationarity** 
 - **Stationary**: Data oscillates around a constant mean
   - Use: ARIMA, Simple Exponential Smoothing
   - Example: Detrended data, differences of prices
@@ -156,26 +156,26 @@ When auto-selection runs, it analyzes:
 
 ### Benefits of Auto-Selection:
 
-1. **No Manual Configuration** ⚡
+1. **No Manual Configuration** 
    - Don't need to understand each model
    - System does the analysis for you
 
-2. **Optimal Accuracy** 🎯
+2. **Optimal Accuracy** 
    - Best model selected for YOUR data
    - Different models for different products
    - Maximizes forecast accuracy
 
-3. **Data-Driven Decisions** 📊
+3. **Data-Driven Decisions** 
    - Recommendations based on actual data patterns
    - Transparent reasoning shown
    - Model comparison provided
 
-4. **Saves Time** ⏱️
+4. **Saves Time** 
    - No trial and error
    - Auto-evaluation of all 7 models
    - Results ready in seconds
 
-5. **Insights** 💡
+5. **Insights** 
    - Understand your data patterns
    - See what makes your data unique
    - Learn why certain models work better
@@ -240,22 +240,22 @@ When auto-selection runs, it analyzes:
 
 ### Disable auto-selection and choose manually if:
 
-1. **You have domain knowledge** 🧠
+1. **You have domain knowledge** 
    - You know your data patterns better than the model
    - You have business reasons to prefer a specific model
    - Historical experience with certain models
 
-2. **You want to test/compare** 📊
+2. **You want to test/compare**
    - Experimenting with different models
    - Benchmarking model performance
    - Learning about forecasting methods
 
-3. **Auto-selection fails** ⚠️
+3. **Auto-selection fails** 
    - Unusual data patterns
    - Very small datasets (< 12 points)
    - Data with anomalies or errors
 
-4. **You need interpretability** 📖
+4. **You need interpretability** 
    - Linear Regression is most interpretable
    - ARIMA is mathematically well-understood
    - Need to explain to non-technical stakeholders
@@ -399,9 +399,9 @@ Example:
 
 ## See Also
 
-📖 [Model Reference](MODEL_REFERENCE.md) - Detailed guide to each model  
-📊 [Quick Start](QUICKSTART.md) - Dashboard usage guide  
-💻 [Implementation Details](MODELS_IMPLEMENTATION.md) - Technical information  
+ [Model Reference](MODEL_REFERENCE.md) - Detailed guide to each model  
+ [Quick Start](QUICKSTART.md) - Dashboard usage guide  
+ [Implementation Details](MODELS_IMPLEMENTATION.md) - Technical information  
 
 ---
 
