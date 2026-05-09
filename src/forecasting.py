@@ -31,6 +31,12 @@ try:
 except ImportError:
     HAS_STATSMODELS = False
 
+try:
+    from xgboost import XGBRegressor
+    HAS_XGBOOST = True
+except ImportError:
+    HAS_XGBOOST = False
+
 from sklearn.linear_model import LinearRegression
 
 
@@ -338,6 +344,74 @@ def _forecast_linear_regression(series: pd.Series, periods: int) -> dict:
     }
 
 
+def _forecast_xgboost(series: pd.Series, periods: int) -> dict:
+    if not HAS_XGBOOST:
+        raise ImportError("xgboost not installed")
+    if len(series) < 6:
+        raise ValueError("Too few data points for XGBoost (need >= 6)")
+
+    freq = _detect_freq(series)
+    train, test = _split_train_test(series)
+
+    def _fit_predict(s, n):
+        # Create lagged features for time series forecasting
+        lookback = min(5, max(1, len(s) // 4))  # Adaptive lookback window
+        X, y = [], []
+        
+        for i in range(lookback, len(s)):
+            X.append(s.iloc[i - lookback:i].values)
+            y.append(s.iloc[i])
+        
+        if len(X) < 2:
+            raise ValueError("Insufficient data after feature engineering")
+        
+        X = np.array(X)
+        y = np.array(y)
+        
+        # Train XGBoost model with conservative hyperparameters
+        model = XGBRegressor(
+            n_estimators=100,
+            max_depth=3,
+            learning_rate=0.05,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            random_state=42,
+            verbosity=0,
+            eval_metric='rmse'
+        )
+        model.fit(X, y, verbose=False)
+        
+        # Forecast iteratively
+        forecasts = []
+        current_window = list(s.iloc[-lookback:].values)
+        
+        for _ in range(n):
+            X_next = np.array(current_window[-lookback:]).reshape(1, -1)
+            pred = model.predict(X_next)[0]
+            pred = max(0, pred)  # Ensure non-negative
+            forecasts.append(pred)
+            current_window.append(pred)
+        
+        return np.array(forecasts)
+
+    try:
+        test_pred = _fit_predict(train, len(test))
+        mape = _mape(test.values, test_pred)
+        rmse = _rmse(test.values, test_pred)
+        forecast_vals = _fit_predict(series, periods)
+        dates = _forecast_dates(series.index[-1], periods, freq)
+        
+        return {
+            'forecast': _safe_positive(forecast_vals),
+            'dates': dates,
+            'mape': mape,
+            'rmse': rmse,
+            'accuracy': round(100 - mape, 2) if mape else None
+        }
+    except Exception as e:
+        raise RuntimeError(f"XGBoost forecasting failed: {e}")
+
+
 # ── Model registry ────────────────────────────────────────────────────────────
 
 MODEL_REGISTRY = {
@@ -348,6 +422,7 @@ MODEL_REGISTRY = {
     'Simple Exponential Smoothing': _forecast_simple_exp_smoothing,
     'Moving Average':            _forecast_moving_average,
     'Linear Regression':         _forecast_linear_regression,
+    'XGBoost':                   _forecast_xgboost,
 }
 
 
