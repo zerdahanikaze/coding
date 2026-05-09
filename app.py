@@ -174,26 +174,17 @@ if data is not None:
             if best_accuracy:
                 st.metric("Accuracy (MAPE)", f"{best_accuracy:.2f}%")
 
-            # ── Model comparison table (shows failures too) ────────────────────
+            # ── Model comparison table (shows all models with accuracy) ──────
             st.subheader("📊 Model Comparison")
             comp_rows = []
             for model_name, result in all_results.items():
-                if result.get('error'):
-                    comp_rows.append({
-                        'Model':  model_name,
-                        'Status': '❌ Failed',
-                        'MAPE':   '—',
-                        'RMSE':   '—',
-                        'Note':   result['error'][:90]
-                    })
-                else:
-                    comp_rows.append({
-                        'Model':  ('⭐ ' if model_name == best_model else '') + model_name,
-                        'Status': '✅ OK',
-                        'MAPE':   f"{result['mape']:.2f}%" if result.get('mape') else 'N/A',
-                        'RMSE':   f"{result['rmse']:.2f}"  if result.get('rmse') else 'N/A',
-                        'Note':   'Best model' if model_name == best_model else ''
-                    })
+                comp_rows.append({
+                    'Model':    ('⭐ ' if model_name == best_model else '') + model_name,
+                    'Accuracy': f"{result.get('accuracy'):.2f}%" if result.get('accuracy') is not None else 'N/A',
+                    'MAPE':     f"{result.get('mape'):.2f}%" if result.get('mape') is not None else 'N/A',
+                    'RMSE':     f"{result.get('rmse'):.2f}" if result.get('rmse') is not None else 'N/A',
+                    'Status':   'Best' if model_name == best_model else 'OK'
+                })
             st.dataframe(pd.DataFrame(comp_rows), use_container_width=True)
 
             # ── Forecast table ─────────────────────────────────────────────────

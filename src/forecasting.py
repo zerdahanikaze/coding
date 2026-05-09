@@ -348,13 +348,12 @@ def _forecast_xgboost(series: pd.Series, periods: int) -> dict:
     if not HAS_XGBOOST:
         raise ImportError("xgboost not installed")
     
-    # XGBoost requires much more data to be effective with time series
-    # Only use it when data is substantial (500+ points = 40+ years of monthly data)
-    if len(series) < 500:
+    # XGBoost requires sufficient data to be effective with time series
+    # Works with datasets up to 600 rows
+    if len(series) < 4:
         raise ValueError(
-            f"XGBoost requires >= 500 data points (weekly data for 10 years or daily for 1.5+ years). "
+            f"XGBoost requires at least 4 data points. "
             f"You have {len(series)} points. "
-            f"XGBoost is designed for high-frequency data with many observations. "
             f"For your dataset, try: SARIMA, Prophet, or Exponential Smoothing instead."
         )
 
