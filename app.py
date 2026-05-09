@@ -329,7 +329,6 @@ st.sidebar.markdown(f"""
 - Works with **or without** a product column
 - Product drill-down — filter by individual product
 - **{len(AVAILABLE_MODELS)} forecasting models** with graceful failure handling
-- Model comparison table (shows errors for failed models)
 - Sales & revenue charts
 - Product profitability & trend analysis
 - Downloadable Word report
