@@ -347,50 +347,103 @@ def _forecast_linear_regression(series: pd.Series, periods: int) -> dict:
 def _forecast_xgboost(series: pd.Series, periods: int) -> dict:
     if not HAS_XGBOOST:
         raise ImportError("xgboost not installed")
-    if len(series) < 6:
-        raise ValueError("Too few data points for XGBoost (need >= 6)")
+    
+    # XGBoost requires much more data to be effective with time series
+    if len(series) < 20:
+        raise ValueError(
+            f"XGBoost needs >= 20 data points for reliable forecasting. "
+            f"Got {len(series)} points. Consider using simpler models for small datasets."
+        )
 
     freq = _detect_freq(series)
     train, test = _split_train_test(series)
 
-    def _fit_predict(s, n):
-        # Create lagged features for time series forecasting
-        lookback = min(5, max(1, len(s) // 4))  # Adaptive lookback window
+    def _create_features(s):
+        """Create advanced time series features for XGBoost."""
         X, y = [], []
         
-        for i in range(lookback, len(s)):
-            X.append(s.iloc[i - lookback:i].values)
-            y.append(s.iloc[i])
+        n = len(s)
+        values = s.values
         
-        if len(X) < 2:
-            raise ValueError("Insufficient data after feature engineering")
+        # Use 6 lags (standard for financial time series)
+        lookback = 6
         
-        X = np.array(X)
-        y = np.array(y)
+        for i in range(lookback, n):
+            # Lagged values (t-1 to t-6)
+            lags = values[i - lookback:i]
+            
+            # Moving average (3-period)
+            ma3 = np.mean(values[max(0, i - 3):i])
+            
+            # Trend: slope of last 5 values
+            recent_idx = np.arange(max(0, i - 5), i)
+            recent_vals = values[max(0, i - 5):i]
+            if len(recent_vals) > 1:
+                trend = np.polyfit(recent_idx if len(recent_idx) > 1 else np.arange(len(recent_vals)), 
+                                   recent_vals, 1)[0]
+            else:
+                trend = 0
+            
+            # Volatility (std of last 6 values)
+            volatility = np.std(values[max(0, i - 6):i]) if i >= 6 else 0
+            
+            # Combine all features
+            features = list(lags) + [ma3, trend, volatility]
+            X.append(features)
+            y.append(values[i])
         
-        # Train XGBoost model with conservative hyperparameters
+        return np.array(X), np.array(y), lookback
+
+    def _fit_predict(s, n):
+        X, y, lookback = _create_features(s)
+        
+        if len(X) < 4:
+            raise ValueError("Insufficient data for feature engineering")
+        
+        # Train XGBoost with parameters tuned for time series
         model = XGBRegressor(
             n_estimators=100,
             max_depth=3,
-            learning_rate=0.05,
+            learning_rate=0.1,
             subsample=0.8,
             colsample_bytree=0.8,
+            reg_alpha=0.5,
+            reg_lambda=1.0,
             random_state=42,
-            verbosity=0,
-            eval_metric='rmse'
+            verbosity=0
         )
         model.fit(X, y, verbose=False)
         
-        # Forecast iteratively
+        # Forecast with smart trend continuation
         forecasts = []
-        current_window = list(s.iloc[-lookback:].values)
+        last_window = s.iloc[-lookback:].values.astype(float)
         
         for _ in range(n):
-            X_next = np.array(current_window[-lookback:]).reshape(1, -1)
+            # Last 6 values
+            lags = last_window[-lookback:]
+            
+            # Moving average
+            ma3 = np.mean(lags[-3:])
+            
+            # Trend
+            if len(lags) > 1:
+                trend = np.polyfit(np.arange(len(lags)), lags, 1)[0]
+            else:
+                trend = 0
+            
+            # Volatility
+            volatility = np.std(lags)
+            
+            # Create feature vector
+            features = np.concatenate([lags, [ma3, trend, volatility]])
+            X_next = features.reshape(1, -1)
+            
+            # Predict
             pred = model.predict(X_next)[0]
-            pred = max(0, pred)  # Ensure non-negative
+            pred = max(0, float(pred))
+            
             forecasts.append(pred)
-            current_window.append(pred)
+            last_window = np.concatenate([last_window[1:], [pred]])
         
         return np.array(forecasts)
 
@@ -410,6 +463,7 @@ def _forecast_xgboost(series: pd.Series, periods: int) -> dict:
         }
     except Exception as e:
         raise RuntimeError(f"XGBoost forecasting failed: {e}")
+
 
 
 # ── Model registry ────────────────────────────────────────────────────────────
