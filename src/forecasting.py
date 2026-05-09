@@ -348,11 +348,11 @@ def _forecast_xgboost(series: pd.Series, periods: int) -> dict:
     if not HAS_XGBOOST:
         raise ImportError("xgboost not installed")
     
-    # XGBoost requires sufficient data to be effective with time series
-    # Works with datasets up to 600 rows
-    if len(series) < 4:
+    # XGBoost requires substantial data to be effective with time series
+    # Only works with datasets of 600+ rows
+    if len(series) < 600:
         raise ValueError(
-            f"XGBoost requires at least 4 data points. "
+            f"XGBoost requires >= 600 data points (for robust time series forecasting). "
             f"You have {len(series)} points. "
             f"For your dataset, try: SARIMA, Prophet, or Exponential Smoothing instead."
         )
@@ -566,13 +566,23 @@ def evaluate_models(df: pd.DataFrame, periods: int = 6,
       'best_accuracy': float
     }
     """
+    sales_series = _aggregate_to_series(df, 'sales')
+    data_points = len(sales_series)
+    
     if models_to_run is None:
         models_to_run = list(MODEL_REGISTRY.keys())
+        # Exclude XGBoost if dataset has fewer than 600 rows
+        if data_points < 600 and 'XGBoost' in models_to_run:
+            models_to_run.remove('XGBoost')
     else:
         # Validate names — unknown names are silently dropped with a warning
         valid = []
         for m in models_to_run:
             if m in MODEL_REGISTRY:
+                # Skip XGBoost if dataset is too small
+                if m == 'XGBoost' and data_points < 600:
+                    warnings.warn(f"XGBoost requires >= 600 data points. You have {data_points}. Skipping XGBoost.")
+                    continue
                 valid.append(m)
             else:
                 warnings.warn(f"Unknown model '{m}' — skipped.")
